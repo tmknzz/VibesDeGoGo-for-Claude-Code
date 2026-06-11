@@ -80,3 +80,48 @@ assert_exit_code 0 "$STATUS" "task notes are exempt from the allowlist"
 
 vdgg_state_clear >/dev/null 2>&1
 assert_file_not_exists ".claude/.vdgg-task-allowlist-${ID}-0" "clear removes task allowlist"
+
+# rollback survives vdgg_state_loop increment (baseline_dir derived from task_base_ref).
+vdgg_state_init >/tmp/vdgg-test-task-rb-init.out 2>/tmp/vdgg-test-task-rb-init.err
+IDRB=$(vdgg_get_id)
+vdgg_state_advance 2 requirements >/dev/null 2>&1
+vdgg_state_advance 3 investigating >/dev/null 2>&1
+vdgg_state_advance 4 planning >/dev/null 2>&1
+vdgg_state_advance 5 task-selected >/dev/null 2>&1
+vdgg_task_begin "TR: rollback survival" src/app.sh >/tmp/vdgg-test-task-rb-begin.out 2>/tmp/vdgg-test-task-rb-begin.err
+vdgg_state_advance 6 implementing >/dev/null 2>&1
+vdgg_state_loop 6 implementing >/tmp/vdgg-test-task-rb-loop.out 2>/tmp/vdgg-test-task-rb-loop.err
+printf 'broken\n' > src/app.sh
+set +e
+vdgg_task_rollback >/tmp/vdgg-test-task-rb-rollback.out 2>/tmp/vdgg-test-task-rb-rollback.err
+RB_SURVIVAL_RC=$?
+set -e
+assert_exit_code 0 "$RB_SURVIVAL_RC" "task rollback succeeds after vdgg_state_loop increment"
+RB_SURVIVAL_CONTENT=$(cat src/app.sh)
+assert_eq "v1" "$RB_SURVIVAL_CONTENT" "task rollback restores file after vdgg_state_loop increment"
+
+# changed-files scoping: OTHER session task notes ARE visible; ACTIVE session task notes are NOT.
+OTHER_ID="99991231-2359-ffff"
+mkdir -p "tasks/vdgg/${OTHER_ID}"
+printf 'other note\n' > "tasks/vdgg/${OTHER_ID}/note.md"
+mkdir -p "tasks/vdgg/${IDRB}"
+printf 'active note\n' > "tasks/vdgg/${IDRB}/x.md"
+CHANGED_SCOPE=$(vdgg_task_changed_files)
+ACTIVE_HIT=$(printf '%s\n' "$CHANGED_SCOPE" | grep -c "^tasks/vdgg/${IDRB}/" || true)
+assert_eq "0" "$ACTIVE_HIT" "changed-files does NOT list ACTIVE session task dir"
+OTHER_HIT=$(printf '%s\n' "$CHANGED_SCOPE" | grep -c "^tasks/vdgg/${OTHER_ID}/" || true)
+assert_eq "1" "$OTHER_HIT" "changed-files DOES list OTHER session task dir"
+rm -rf tasks
+
+vdgg_state_clear >/dev/null 2>&1
+
+# zsh regression: `local path` would empty $PATH when sourced into zsh.
+if command -v zsh >/dev/null 2>&1; then
+    vdgg_state_clear >/dev/null 2>&1
+    zsh -c "cd '${TMPDIR_VDGG}' && export VDGG_CWD='${TMPDIR_VDGG}' && source '${ROOT}/skills/vibesdegogo/scripts/vdgg-state.sh' && vdgg_state_init && vdgg_state_advance 2 requirements && vdgg_state_advance 3 investigating && vdgg_state_advance 4 planning && vdgg_state_advance 5 task-selected && vdgg_task_begin 'TZ: zsh probe' src/app.sh" >/tmp/vdgg-test-task-zsh.out 2>/tmp/vdgg-test-task-zsh.err
+    ZSH_RC=$?
+    assert_exit_code 0 "$ZSH_RC" "helpers work when sourced into zsh"
+    IDZ=$(cat "${TMPDIR_VDGG}/.claude/.vdgg-active")
+    assert_file_exists ".claude/.vdgg-task-allowlist-${IDZ}-0" "zsh vdgg_task_begin creates allowlist"
+    vdgg_state_clear >/dev/null 2>&1
+fi

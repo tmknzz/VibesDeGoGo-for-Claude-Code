@@ -62,21 +62,23 @@ _vdgg_task_gate_file_for_id() {
     echo "${VDGG_STATE_DIR}/.vdgg-task-gate-${id}-${loop}"
 }
 
+# NOTE: never declare `local path` in these helpers — when the script is
+# sourced into zsh, `path` is tied to $PATH and localizing it empties PATH.
 # Strip the project prefix (or ./) so allowlist entries are repo-relative.
 _vdgg_normalize_path() {
-    local path="$1"
-    case "$path" in
-        "$VDGG_CWD"/*) path="${path#"$VDGG_CWD"/}" ;;
-        ./*) path="${path#./}" ;;
+    local entry="$1"
+    case "$entry" in
+        "$VDGG_CWD"/*) entry="${entry#"$VDGG_CWD"/}" ;;
+        ./*) entry="${entry#./}" ;;
     esac
-    printf '%s\n' "$path"
+    printf '%s\n' "$entry"
 }
 
 _vdgg_path_is_safe_relative() {
-    local path
-    path=$(_vdgg_normalize_path "$1")
-    [ -n "$path" ] || return 1
-    case "$path" in
+    local entry
+    entry=$(_vdgg_normalize_path "$1")
+    [ -n "$entry" ] || return 1
+    case "$entry" in
         /*|../*|*/../*|..|.) return 1 ;;
     esac
     return 0
@@ -457,7 +459,7 @@ vdgg_task_begin() {
         echo "vdgg_task_begin: active session not found" >&2
         return 1
     fi
-    local loop allowlist_file baseline_dir baseline_status gate_file path normalized
+    local loop allowlist_file baseline_dir baseline_status gate_file entry normalized
     loop=$(_vdgg_task_loop)
     allowlist_file=$(_vdgg_task_allowlist_file_for_id "$id" "$loop")
     baseline_dir=$(_vdgg_task_baseline_dir_for_id "$id" "$loop")
@@ -469,12 +471,12 @@ vdgg_task_begin() {
     mkdir -p "$baseline_dir"
     : > "$allowlist_file"
 
-    for path in "$@"; do
-        if ! _vdgg_path_is_safe_relative "$path"; then
-            echo "vdgg_task_begin: unsafe allowlist path: $path" >&2
+    for entry in "$@"; do
+        if ! _vdgg_path_is_safe_relative "$entry"; then
+            echo "vdgg_task_begin: unsafe allowlist path: $entry" >&2
             return 1
         fi
-        normalized=$(_vdgg_normalize_path "$path")
+        normalized=$(_vdgg_normalize_path "$entry")
         printf '%s\n' "$normalized" >> "$allowlist_file"
         if [ -e "${VDGG_CWD}/$normalized" ]; then
             mkdir -p "$(dirname "$baseline_dir/$normalized")"
@@ -510,7 +512,8 @@ vdgg_task_changed_files() {
     { [ -f "$baseline_status" ] && cat "$baseline_status"; cat "$current_status"; } \
         | sort | uniq -u \
         | sed -E 's/^...//; s/^"//; s/"$//; s/.* -> //' \
-        | grep -v -e '^\.claude/\.vdgg-' -e '^tasks/vdgg/' \
+        | grep -v '^\.claude/\.vdgg-' \
+        | grep -v "^tasks/vdgg/${id}/" \
         | sort -u || true
     rm -f "$current_status"
 }
@@ -561,14 +564,21 @@ EOF
 
 # Revert the current task's changes back to the vdgg_task_begin baseline.
 vdgg_task_rollback() {
-    local id loop baseline_dir gate_file changed file
+    local id loop base_ref baseline_dir gate_file changed file
     id=$(_vdgg_get_active_id)
     if [ -z "$id" ]; then
         echo "vdgg_task_rollback: active session not found" >&2
         return 1
     fi
     loop=$(_vdgg_task_loop)
-    baseline_dir=$(_vdgg_task_baseline_dir_for_id "$id" "$loop")
+    # Derive the baseline dir from the stored task_base_ref so rollback survives
+    # vdgg_state_loop increments; fall back to the current-loop derivation.
+    base_ref=$(grep '^task_base_ref=' "$(_vdgg_get_state_file)" | cut -d= -f2- || true)
+    if [ -n "$base_ref" ]; then
+        baseline_dir="${base_ref/baseline-status-/baseline-}"
+    else
+        baseline_dir=$(_vdgg_task_baseline_dir_for_id "$id" "$loop")
+    fi
     gate_file=$(_vdgg_task_gate_file_for_id "$id" "$loop")
     if [ ! -d "$baseline_dir" ]; then
         echo "vdgg_task_rollback: baseline dir not found" >&2
