@@ -54,3 +54,111 @@ assert_exit_code 2 "$STATUS" "direct active file edit is blocked"
 write_state investigating 3
 STATUS=$(run_hook '{"tool_name":"Grep","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"pattern":"x"}}')
 assert_exit_code 0 "$STATUS" "read-like tools pass during investigation"
+
+# Review gate: a clean review sentinel (vdgg_state_mark_reviewed) satisfies verified.
+write_state testing 7
+cat > "$TMPDIR_VDGG/.claude/.vdgg-review-sentinel-test-id-0" <<EOF
+started=1
+started_at=2026-06-11T00:00:00Z
+modified=0
+modified_files=
+EOF
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"# [VibesDeGoGo! Step 7 Start] step=7, phase=verified, loop=0\nvdgg_state_advance 7 verified"}}')
+assert_exit_code 0 "$STATUS" "verified transition is allowed with clean review sentinel"
+assert_file_not_exists "$TMPDIR_VDGG/.claude/.vdgg-review-sentinel-test-id-0" "review sentinel is consumed on verified"
+
+# Review gate: a modified review sentinel blocks verified.
+write_state testing 7
+cat > "$TMPDIR_VDGG/.claude/.vdgg-review-sentinel-test-id-0" <<EOF
+started=1
+started_at=2026-06-11T00:00:00Z
+modified=1
+modified_files=src/foo.sh
+EOF
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"# [VibesDeGoGo! Step 7 Start] step=7, phase=verified, loop=0\nvdgg_state_advance 7 verified"}}')
+assert_exit_code 2 "$STATUS" "verified transition is blocked when review modified code"
+rm -f "$TMPDIR_VDGG/.claude/.vdgg-review-sentinel-test-id-0"
+
+# Sentinel forgery: direct Write to a sentinel path is blocked.
+write_state testing 7
+STATUS=$(run_hook '{"tool_name":"Write","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"file_path":"'"$TMPDIR_VDGG"'/.claude/.vdgg-simplify-sentinel-test-id-0"}}')
+assert_exit_code 2 "$STATUS" "direct sentinel write is blocked"
+
+# Sentinel forgery: Bash heredoc write to a sentinel path is blocked.
+write_state testing 7
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"cat > .claude/.vdgg-simplify-sentinel-test-id-0 <<EOF\nmodified=0\nEOF"}}')
+assert_exit_code 2 "$STATUS" "bash sentinel forgery is blocked"
+
+write_state_with_allowlist() {
+    local phase="$1" step="$2" loop="${3:-0}"
+    write_state "$phase" "$step" "$loop"
+    printf 'src/app.sh\n' > "$TMPDIR_VDGG/.claude/.vdgg-task-allowlist-test-id-${loop}"
+    cat > "$TMPDIR_VDGG/.claude/.vdgg-state-test-id" <<EOF
+step=${step}
+phase=${phase}
+loop_count=${loop}
+current_task=T
+task_allowlist_file=$TMPDIR_VDGG/.claude/.vdgg-task-allowlist-test-id-${loop}
+task_base_ref=
+vdgg_id=test-id
+last_updated=2026-06-11T00:00:00Z
+EOF
+}
+
+# Task allowlist: implementing edits are blocked without vdgg_task_begin.
+write_state implementing 6
+STATUS=$(run_hook '{"tool_name":"Edit","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"file_path":"'"$TMPDIR_VDGG"'/src/app.sh"}}')
+assert_exit_code 2 "$STATUS" "implementing edit without allowlist is blocked"
+
+# Task allowlist: allowlisted path is editable, others are not.
+write_state_with_allowlist implementing 6
+STATUS=$(run_hook '{"tool_name":"Edit","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"file_path":"'"$TMPDIR_VDGG"'/src/app.sh"}}')
+assert_exit_code 0 "$STATUS" "allowlisted edit passes"
+STATUS=$(run_hook '{"tool_name":"Edit","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"file_path":"'"$TMPDIR_VDGG"'/src/other.sh"}}')
+assert_exit_code 2 "$STATUS" "non-allowlisted edit is blocked"
+
+# Task allowlist: task notes stay editable without allowlisting.
+write_state implementing 6
+STATUS=$(run_hook '{"tool_name":"Edit","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"file_path":"'"$TMPDIR_VDGG"'/tasks/vdgg/test-id/progress.md"}}')
+assert_exit_code 0 "$STATUS" "task notes edit passes without allowlist"
+
+# Task gate: verified is blocked when the allowlist is active but the gate has not passed.
+write_state_with_allowlist testing 7
+cat > "$TMPDIR_VDGG/.claude/.vdgg-review-sentinel-test-id-0" <<EOF
+started=1
+started_at=2026-06-11T00:00:00Z
+modified=0
+modified_files=
+EOF
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"# [VibesDeGoGo! Step 7 Start] step=7, phase=verified, loop=0\nvdgg_state_advance 7 verified"}}')
+assert_exit_code 2 "$STATUS" "verified is blocked without task gate pass"
+
+# Task gate: verified passes once the gate file exists alongside a clean sentinel.
+printf 'passed=1\n' > "$TMPDIR_VDGG/.claude/.vdgg-task-gate-test-id-0"
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"# [VibesDeGoGo! Step 7 Start] step=7, phase=verified, loop=0\nvdgg_state_advance 7 verified"}}')
+assert_exit_code 0 "$STATUS" "verified passes with task gate and clean sentinel"
+rm -f "$TMPDIR_VDGG/.claude/.vdgg-task-gate-test-id-0" "$TMPDIR_VDGG/.claude/.vdgg-task-allowlist-test-id-0"
+
+# jq missing: hooks stay out of the way when no VDGG session is active.
+FAKEBIN=$(mktemp -d)
+for tool in cat grep sed head; do
+    ln -s "$(command -v $tool)" "$FAKEBIN/$tool"
+done
+BASH_BIN="$(command -v bash)"
+NO_VDGG_DIR=$(mktemp -d)
+set +e
+printf '%s' '{"tool_name":"Bash","cwd":"'"$NO_VDGG_DIR"'","tool_input":{"command":"echo hi"}}' \
+    | env PATH="$FAKEBIN" "$BASH_BIN" "$PRETOOL" >/dev/null 2>&1
+STATUS=$?
+set -e
+assert_exit_code 0 "$STATUS" "jq missing + inactive session does not block"
+
+# jq missing: an active session still fails closed.
+write_state implementing 6
+set +e
+printf '%s' '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"echo hi"}}' \
+    | env PATH="$FAKEBIN" "$BASH_BIN" "$PRETOOL" >/dev/null 2>&1
+STATUS=$?
+set -e
+assert_exit_code 2 "$STATUS" "jq missing + active session fails closed"
+rm -rf "$FAKEBIN" "$NO_VDGG_DIR"

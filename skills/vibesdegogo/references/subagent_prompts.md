@@ -2,6 +2,8 @@
 
 VibesDeGoGo! is serial by default. Use subagents only when parallel work is clearly useful or tasks are independent.
 
+These prompts double as the prompt templates for delegated step executors (`STEP3/4/6_EXECUTOR_COMMAND` in `.vdgg-target`): fill in the input/output paths and pass the prompt to the external command. The artifact contract — which files to read, which file to write, which headings to use — is the executor interface; the orchestrating agent validates the artifacts before advancing.
+
 ## Step 3 Investigation Subagent
 
 ```text
