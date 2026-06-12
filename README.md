@@ -8,6 +8,12 @@ It exists because AI coding agents can skip the boring parts: requirements,
 investigation, verification, and clear handoff. VibesDeGoGo! turns those parts
 into rails.
 
+The hooks are guardrails, not a sandbox: they mechanically block the common
+drift paths (out-of-scope edits, skipped verification and review, silent
+stops), and the task gate cross-checks actual file changes against the
+declared allowlist. Treat them as safety rails plus an audit trail, not as
+proof of correctness.
+
 ## Core Flow
 
 1. Agree on Goal / Constraints / Acceptance criteria.
@@ -23,6 +29,11 @@ into rails.
 ## Layout
 
 ```text
+.claude-plugin/
+  plugin.json
+  marketplace.json
+hooks/
+  hooks.json
 skills/vibesdegogo/
   SKILL.md
   scripts/
@@ -40,6 +51,19 @@ skills/vibesdegogo/
 ```
 
 ## Install
+
+### As a plugin (recommended)
+
+Inside Claude Code, run:
+
+```text
+/plugin marketplace add tmknzz/VibesDeGoGo-for-Claude-Code
+/plugin install vibesdegogo@vibesdegogo
+```
+
+This registers the skill and activates the hooks automatically.
+
+### Manual install
 
 Copy the skill folder into Claude Code's skills directory:
 

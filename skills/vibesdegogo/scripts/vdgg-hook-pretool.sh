@@ -6,8 +6,18 @@ set -euo pipefail
 INPUT=$(cat)
 
 if ! command -v jq >/dev/null 2>&1; then
-    # Allow the current Bash command through if it is itself an attempt to install jq,
-    # so the user can run `brew install jq` / `apt-get install jq` etc. without unblocking.
+    # Without jq the hook JSON cannot be parsed properly. Best-effort: extract
+    # cwd with grep/sed and check for an active VibesDeGoGo! session there. No
+    # active session -> stay out of the way so unrelated repositories are never
+    # blocked by a missing dependency.
+    FALLBACK_CWD=$(printf '%s' "$INPUT" | grep -oE '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed -E 's/.*:[[:space:]]*"([^"]*)"$/\1/')
+    FALLBACK_CWD="${FALLBACK_CWD:-$PWD}"
+    if [ ! -f "$FALLBACK_CWD/.claude/.vdgg-active" ]; then
+        exit 0
+    fi
+    # An active session must not run unguarded. Fail closed, but allow the
+    # current Bash command through if it is itself an attempt to install jq,
+    # so the user can run `brew install jq` / `apt-get install jq` etc.
     if printf '%s' "$INPUT" | grep -qE '"command"[[:space:]]*:[[:space:]]*"[^"]*(brew[[:space:]]+(install|reinstall)|apt(-get)?[[:space:]]+install|apk[[:space:]]+add|dnf[[:space:]]+install|yum[[:space:]]+install|pacman[[:space:]]+-S)[[:space:]]+[^"]*jq'; then
         exit 0
     fi
@@ -55,6 +65,8 @@ PHASE=$(grep "^phase=" "$STATE_FILE" | cut -d= -f2 || true)
 STEP=$(grep "^step=" "$STATE_FILE" | cut -d= -f2 || true)
 LOOP_COUNT=$(grep "^loop_count=" "$STATE_FILE" | cut -d= -f2 || true)
 LOOP_COUNT="${LOOP_COUNT:-0}"
+TASK_ALLOWLIST_FILE=$(grep "^task_allowlist_file=" "$STATE_FILE" | cut -d= -f2- || true)
+TASK_GATE_FILE="$CWD/.claude/.vdgg-task-gate-${VDGG_ID}-${LOOP_COUNT}"
 
 if [ -z "$PHASE" ]; then
     exit 0
@@ -62,6 +74,16 @@ fi
 
 # Task directory for the active id, used for phase-specific write allowances.
 TASKS_DIR="$CWD/tasks/vdgg/${VDGG_ID}"
+
+# Strip the project prefix (or ./) to compare against allowlist entries.
+_vdgg_normalize_project_path() {
+    local p="$1"
+    case "$p" in
+        "$CWD"/*) p="${p#"$CWD"/}" ;;
+        ./*) p="${p#./}" ;;
+    esac
+    printf '%s\n' "$p"
+}
 
 # Extract only the fields needed for the current tool type.
 
@@ -100,27 +122,27 @@ if [ -f "$ERROR_FLAG" ]; then
     fi
 fi
 
-# Guard 4: block direct state-file edits in all phases.
+# Guard 4: block direct edits to any .claude/.vdgg-* sidecar (state, active,
+# sentinels) in all phases. Sentinel forgery would bypass the review gate.
 if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; then
-    if [[ "$FILE_PATH" == *"/.claude/.vdgg-state-"* ]] || [[ "$FILE_PATH" == *"/.claude/.vdgg-active" ]] \
-        || [[ "$FILE_PATH" == *".claude/.vdgg-state-"* ]] || [[ "$FILE_PATH" == *".claude/.vdgg-active" ]]; then
-        echo "VibesDeGoGo! [${VDGG_ID}]: Direct state-file edits are blocked. Use vdgg_state_* helpers." >&2
+    if [[ "$FILE_PATH" == *".claude/.vdgg-"* ]]; then
+        echo "VibesDeGoGo! [${VDGG_ID}]: Direct edits to VibesDeGoGo! sidecar files are blocked. Use vdgg_state_* helpers." >&2
         exit 2
     fi
 fi
 if [ "$TOOL_NAME" = "Bash" ]; then
-    # Bash can also mutate state files through redirection or file operations.
-    # `git commit` is exempt: the command text may legitimately mention state-file
+    # Bash can also mutate sidecar files through redirection or file operations.
+    # `git commit` is exempt: the command text may legitimately mention sidecar
     # paths inside the commit message, and git commit does not write to those
     # tracked files directly. Commit phase rules and the implementing/testing
     # commit-blocking pattern still apply elsewhere.
     if echo "$COMMAND" | grep -qE '(^|[^a-zA-Z0-9_-])git[[:space:]]+commit($|[[:space:]])'; then
         :
-    elif echo "$COMMAND" | grep -qE '(\.claude/\.vdgg-state-|\.claude/\.vdgg-active)'; then
+    elif echo "$COMMAND" | grep -qE '\.claude/\.vdgg-'; then
         # Reads are allowed; writes must go through vdgg_state_* helpers.
         # `>[^&]` excludes fd-merge redirects (2>&1, >&2) which are not destructive.
         if echo "$COMMAND" | grep -qE '(>[^&]|tee[[:space:]]|sed[[:space:]]+-i|mv[[:space:]]|cp[[:space:]]|rm[[:space:]])'; then
-            echo "VibesDeGoGo! [${VDGG_ID}]: Direct state-file edits are blocked. Use vdgg_state_* helpers." >&2
+            echo "VibesDeGoGo! [${VDGG_ID}]: Direct edits to VibesDeGoGo! sidecar files are blocked. Use vdgg_state_* helpers." >&2
             exit 2
         fi
     fi
@@ -201,7 +223,7 @@ case "$PHASE" in
         # During declaration/requirements, only task files may be written.
         if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; then
             if [ -n "$FILE_PATH" ]; then
-                if [[ "$FILE_PATH" == */${TASKS_DIR}/* ]] || [[ "$FILE_PATH" == ${TASKS_DIR}/* ]]; then
+                if [[ "$FILE_PATH" == ${TASKS_DIR}/* ]] || [[ "$FILE_PATH" == tasks/vdgg/${VDGG_ID}/* ]]; then
                     exit 0
                 fi
                 echo "VibesDeGoGo! [${VDGG_ID:-unknown}]: Tool call blocked by VibesDeGoGo! hook." >&2
@@ -224,7 +246,7 @@ case "$PHASE" in
         # Investigation and planning may only update task documentation.
         if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; then
             if [ -n "$FILE_PATH" ]; then
-                if [[ "$FILE_PATH" == */${TASKS_DIR}/* ]] || [[ "$FILE_PATH" == ${TASKS_DIR}/* ]]; then
+                if [[ "$FILE_PATH" == ${TASKS_DIR}/* ]] || [[ "$FILE_PATH" == tasks/vdgg/${VDGG_ID}/* ]]; then
                     exit 0
                 fi
                 echo "VibesDeGoGo! [${VDGG_ID:-unknown}]: Tool call blocked by VibesDeGoGo! hook." >&2
@@ -242,6 +264,23 @@ case "$PHASE" in
         ;;
 
     implementing|testing)
+        # Implementation edits must stay inside the task allowlist declared by
+        # vdgg_task_begin. Task notes under tasks/vdgg/{id}/ stay editable.
+        if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; then
+            if [ -n "$FILE_PATH" ] \
+                && [[ "$FILE_PATH" != ${TASKS_DIR}/* ]] \
+                && [[ "$FILE_PATH" != tasks/vdgg/${VDGG_ID}/* ]]; then
+                if [ -z "$TASK_ALLOWLIST_FILE" ] || [ ! -f "$TASK_ALLOWLIST_FILE" ]; then
+                    echo "VibesDeGoGo! Step ${STEP} (${PHASE}) [${VDGG_ID}]: No active task allowlist. Run vdgg_task_begin before editing implementation files." >&2
+                    exit 2
+                fi
+                NORMALIZED_PATH=$(_vdgg_normalize_project_path "$FILE_PATH")
+                if ! grep -qxF "$NORMALIZED_PATH" "$TASK_ALLOWLIST_FILE"; then
+                    echo "VibesDeGoGo! Step ${STEP} (${PHASE}) [${VDGG_ID}]: Task allowlist blocks edit: ${NORMALIZED_PATH}" >&2
+                    exit 2
+                fi
+            fi
+        fi
         # Commit only after verification and progress are complete.
         if [ "$TOOL_NAME" = "Bash" ]; then
             if echo "$COMMAND" | grep -qE '(^|[^a-zA-Z0-9_-])git[[:space:]]+commit($|[[:space:]])'; then
@@ -253,21 +292,34 @@ case "$PHASE" in
                 echo "VibesDeGoGo! Step ${STEP} (${PHASE}) [${VDGG_ID}]: This action is blocked in the current phase." >&2
                 exit 2
             fi
-            # verified requires a simplify sentinel, and simplify must not have edited code.
+            # verified requires a review gate: either the simplify sentinel or the
+            # explicit review sentinel (vdgg_state_mark_reviewed / vdgg_review_run),
+            # and the review must not have edited implementation code.
             if [ "$PHASE" = "testing" ] && echo "$COMMAND" | grep -qE 'vdgg_state_(advance|loop|write)[[:space:]]+[0-9]+[[:space:]]+verified'; then
-                SENTINEL_FILE="$CWD/.claude/.vdgg-simplify-sentinel-${VDGG_ID}-${LOOP_COUNT}"
-                if [ ! -f "$SENTINEL_FILE" ]; then
+                # When a task allowlist is active, the task gate must have passed.
+                if [ -n "$TASK_ALLOWLIST_FILE" ] && [ -f "$TASK_ALLOWLIST_FILE" ] && [ ! -f "$TASK_GATE_FILE" ]; then
+                    echo "VibesDeGoGo! Step ${STEP} (${PHASE}) [${VDGG_ID}]: Run vdgg_task_gate successfully before verified." >&2
+                    exit 2
+                fi
+                SIMPLIFY_SENTINEL="$CWD/.claude/.vdgg-simplify-sentinel-${VDGG_ID}-${LOOP_COUNT}"
+                REVIEW_SENTINEL="$CWD/.claude/.vdgg-review-sentinel-${VDGG_ID}-${LOOP_COUNT}"
+                GATE_FILE=""
+                if [ -f "$SIMPLIFY_SENTINEL" ]; then
+                    GATE_FILE="$SIMPLIFY_SENTINEL"
+                elif [ -f "$REVIEW_SENTINEL" ]; then
+                    GATE_FILE="$REVIEW_SENTINEL"
+                fi
+                if [ -z "$GATE_FILE" ]; then
                     echo "VibesDeGoGo! [${VDGG_ID:-unknown}]: Tool call blocked by VibesDeGoGo! hook." >&2
                     exit 2
                 fi
-                MODIFIED=$(grep '^modified=' "$SENTINEL_FILE" | head -1 | sed 's/^modified=//')
+                MODIFIED=$(grep '^modified=' "$GATE_FILE" | head -1 | sed 's/^modified=//')
                 if [ "$MODIFIED" = "1" ]; then
-                    MODIFIED_FILES=$(grep '^modified_files=' "$SENTINEL_FILE" | head -1 | sed 's/^modified_files=//')
                     echo "VibesDeGoGo! Step ${STEP} (${PHASE}) [${VDGG_ID}]: This action is blocked in the current phase." >&2
                     exit 2
                 fi
-                # Consume the sentinel so it cannot be reused by a later cycle.
-                rm -f "$SENTINEL_FILE"
+                # Consume the sentinels so they cannot be reused by a later cycle.
+                rm -f "$SIMPLIFY_SENTINEL" "$REVIEW_SENTINEL"
             fi
         fi
         ;;

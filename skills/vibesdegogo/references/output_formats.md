@@ -109,6 +109,9 @@ What I verified:
 
 Next action:
 - Review the GitHub PR. If it looks good, tell me to merge it.
+  (A pull request is GitHub's confirmation page for a proposed change:
+   it shows exactly what would change, and nothing lands in your main
+   branch until you approve the merge.)
 
 Build/version numbers:
 - <values or none configured>

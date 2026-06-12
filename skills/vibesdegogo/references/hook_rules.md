@@ -4,14 +4,17 @@ This file documents the behavior implemented by the hooks.
 
 ## Common Guards
 
-State files are protected. The hooks block direct edits to:
+Sidecar files are protected. The hooks block direct edits (Edit/Write tools and
+Bash writes such as redirection, `tee`, `sed -i`, `mv`, `cp`, `rm`) to every
+path matching:
 
 ```text
-.claude/.vdgg-state-*
-.claude/.vdgg-active
+.claude/.vdgg-*
 ```
 
-Use `vdgg_state_*` helpers instead.
+This covers state files, the active marker, and the simplify/review sentinels —
+so the review gate cannot be satisfied by forging a sentinel. Use `vdgg_state_*`
+helpers instead.
 
 Step declarations are validated for Bash commands that call:
 
@@ -25,7 +28,7 @@ The Bash command text must include the matching declaration:
 
 ```bash
 # [VibesDeGoGo! Step 3 Start] step=3, phase=investigating, loop=0
-source $HOME/.claude/skills/vibesdegogo/scripts/vdgg-state.sh && vdgg_state_advance 3 investigating
+source "$VDGG_SKILL_DIR/scripts/vdgg-state.sh" && vdgg_state_advance 3 investigating
 ```
 
 For Step 2, `[VibesDeGoGo! Declaration]` is also accepted because it follows Step 1 initialization.
@@ -40,8 +43,8 @@ For Step 2, `[VibesDeGoGo! Declaration]` is also accepted because it follows Ste
 | `investigating` | 3 | only `tasks/vdgg/{id}/` | allow except state writes | allow |
 | `planning` | 4 | only `tasks/vdgg/{id}/` | allow except state writes | allow |
 | `task-selected` | 5 | block | allow except state writes | allow |
-| `implementing` | 6 | allow except state files | block commits and test commands | allow |
-| `testing` | 7 | allow except state files | block commits, direct testing to implementing, and verified without simplify | allow |
+| `implementing` | 6 | only task-allowlisted files (task notes exempt) | block commits and test commands | allow |
+| `testing` | 7 | only task-allowlisted files (task notes exempt) | block commits, direct testing to implementing, and verified without review gate + task gate | allow |
 | `reflection` | 6-R | only `progress.md` and `investigation-r*.md` | block direct verified and require updated retry docs before implementing | allow |
 | `verified` | 7 end | block | allow except state writes | allow |
 | `progress` | 8 | only `progress.md` and configured version files | allow except state writes | allow |
@@ -65,17 +68,17 @@ The agent should briefly state what failed and what it will do next.
 
 Search commands such as `rg`, `grep`, `find`, `sed`, `awk`, `jq`, `test`, and `[` are treated specially: exit code 1 is allowed as "no matches".
 
-## Simplify Gate
+## Review Gate (simplify or explicit review)
 
-During `testing`, successful verification must be followed by the `simplify` skill.
-
-PostToolUse creates:
+During `testing`, successful verification must be followed by a review pass.
+Two sentinels can satisfy the gate:
 
 ```text
-.claude/.vdgg-simplify-sentinel-{vdgg_id}-{loop_count}
+.claude/.vdgg-simplify-sentinel-{vdgg_id}-{loop_count}   created by PostToolUse when the simplify skill runs
+.claude/.vdgg-review-sentinel-{vdgg_id}-{loop_count}     created by vdgg_state_mark_reviewed / vdgg_review_run
 ```
 
-Fields:
+Fields (both sentinels):
 
 ```text
 started=1
@@ -86,10 +89,15 @@ modified_files=<comma-separated paths>
 
 Verified transition behavior:
 
-- sentinel missing: block verified transition,
-- `modified=0`: allow verified transition and delete sentinel,
+- no sentinel present: block verified transition,
+- `modified=0`: allow verified transition and delete the sentinels,
 - `modified=1`: block verified transition and require reflection plus re-test.
 
-## Known Limit
+PostToolUse flips `modified=1` on whichever sentinel exists when Edit/Write
+touches implementation files during `testing` (sidecar and `tasks/vdgg/` paths
+are excluded). Sentinels cannot be written directly; see Common Guards.
 
-The Stop hook depends on Claude Code providing `cwd` and `transcript_path` in hook JSON. If Claude Code changes that contract, the Stop hook may become a no-op rather than a blocker.
+## Known Limits
+
+- The Stop hook depends on Claude Code providing `cwd` and `transcript_path` in hook JSON. If Claude Code changes that contract, the Stop hook may become a no-op rather than a blocker.
+- The reflection gate compares whole-second file mtimes; if `progress.md` or `investigation-r*.md` is written in the same second as the state transition, the return to implementing can be blocked once — retrying a moment later succeeds.

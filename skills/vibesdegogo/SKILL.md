@@ -1,7 +1,7 @@
 ---
 name: "VibesDeGoGo!"
 description: "A state-and-hook workflow for Claude Code that keeps coding agents moving until done while stopping only before constraint violations."
-version: 0.2.0
+version: 0.3.0
 ---
 
 # VibesDeGoGo!
@@ -25,6 +25,10 @@ Trigger phrases include `/VibesDeGoGo!`, "use VibesDeGoGo!", and similar request
 - Delegate only when parallel execution helps or when multiple independent tasks can safely run at the same time.
 - Do not delegate merely to save context, because the area is unfamiliar, or because the work may take time.
 - Monitor subagents and correct direction if they drift.
+
+### Delegated step executors
+
+Steps 3, 4, and 6 communicate only through files under `tasks/vdgg/{id}/`, so their executor is swappable. When `.vdgg-target` sets `STEP3_EXECUTOR_COMMAND`, `STEP4_EXECUTOR_COMMAND`, or `STEP6_EXECUTOR_COMMAND` (see `references/target_schema.md`), run that command for the step instead of doing the work inline, using the matching prompt from `references/subagent_prompts.md` with paths filled in. Before advancing, validate the executor's artifacts yourself: the output file exists and contains the required headings; for Step 6, the task allowlist and `vdgg_task_gate` still apply, which catches any out-of-allowlist edits the executor made. Steps 1, 2, 5, 8, and 9 are never delegated.
 
 ## Standard-First Contract
 
@@ -74,7 +78,8 @@ Minimum flow:
 2. Use `rg` and targeted reads to inspect the change site and direct references.
 3. Make the smallest change that follows existing patterns.
 4. Run the declared verification. Do not skip verification.
-5. Report only changes, verification result, and residual risk.
+5. If the change will be built, deployed, or committed and `.vdgg-target` configures version files (`VERSION_FILE_*_PATH` / `_KEY`), bump each configured key to a value newer than `HEAD` before building/deploying. This is the only Step 8 obligation lightweight mode keeps; do not skip it just because the rest of Step 8 is omitted.
+6. Report only changes, verification result, and residual risk.
 
 Escalate to full flow if tests fail twice, scope expands, specification or compatibility judgment is needed, custom implementation looks necessary, verification is unclear, or the agent is about to proceed on a guess.
 
@@ -141,14 +146,16 @@ Step 0 is not mechanically enforced because no state file exists yet.
 
 ## Step 1: Formation Declaration
 
-Initialize state:
+Initialize state. Source the state helpers in every Bash command that calls `vdgg_*` functions (shells do not persist between commands). For manual installs the helpers live at `$HOME/.claude/skills/vibesdegogo`; for plugin installs use this skill's base directory as announced when the skill loads:
 
 ```bash
-source $HOME/.claude/skills/vibesdegogo/scripts/vdgg-state.sh
+VDGG_SKILL_DIR="${VDGG_SKILL_DIR:-$HOME/.claude/skills/vibesdegogo}"
+# Plugin install: replace the default above with this skill's announced base directory.
+source "$VDGG_SKILL_DIR/scripts/vdgg-state.sh"
 vdgg_state_init
 ```
 
-For the default `branch-pr` workflow, create a feature branch after `vdgg_state_init` and before any code editing.
+For the default `branch-pr` workflow, create a feature branch after `vdgg_state_init` and before any code editing. The branch name MUST describe the change, not the workflow.
 
 Branch name is derived from the Step 0 Goal, not from the VibesDeGoGo! id. Pick a name in the form `{type}/{slug}` where:
 
@@ -164,13 +171,23 @@ if [ "${WORKFLOW:-branch-pr}" != "trunk" ]; then
         BASE_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')
         BASE_BRANCH=${BASE_BRANCH:-main}
     fi
-    # VDGG_BRANCH: agent fills in based on the agreed Step 0 Goal.
-    VDGG_BRANCH="<type>/<kebab-case-slug>"
-    git checkout -b "$VDGG_BRANCH"
+    CUR=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+    # Stay on the current branch if it's already a non-base feature branch
+    # (e.g. continuing or bundling another task onto the same branch).
+    if [ "$CUR" = "$BASE_BRANCH" ]; then
+        # On base branch -> create a new feature branch. The agent MUST pick
+        # the {type}/{slug} name from the Step 0 Goal; this snippet does not
+        # auto-generate one. Do NOT use `vibesdegogo/` as a prefix — that
+        # names the workflow, not the change, and is useless to anyone
+        # reading the PR list.
+        echo "vdgg: on base branch ($BASE_BRANCH). Run:" >&2
+        echo "  git checkout -b <type>/<kebab-slug-derived-from-Step-0-Goal>" >&2
+        echo "Types: feat | fix | refactor | docs | test | chore" >&2
+    fi
 fi
 ```
 
-Nesting is allowed: if the current branch is already a feature branch, a new `{type}/{slug}` branch is still created on top of it. The Step 1 block runs once per session because `vdgg_state_init` refuses a second initialization.
+If the current branch is already a feature branch, stay on it when this session continues or bundles work onto that change; create a new nested `{type}/{slug}` branch only when the session starts a genuinely separate change. The Step 1 block runs once per session because `vdgg_state_init` refuses a second initialization.
 
 Then output the Step 1 declaration from `references/output_formats.md`.
 
@@ -237,13 +254,15 @@ vdgg_state_advance 4 planning
 
 ## Step 5: Select One Task
 
-Choose one task from `todo.md` and record it in state:
+Choose one task from `todo.md`. The task must be small enough to complete implementation, tests, and verification in one Step 6 to Step 8 loop; split it before Step 6 if it is not. Declare an allowlist of every implementation/test/documentation file this task is allowed to change; keep it narrow and task-specific. Task notes under `tasks/vdgg/{id}/` never need allowlisting.
 
 ```bash
 # [VibesDeGoGo! Step 5 Start] step=5, phase=task-selected, loop=0
 vdgg_state_advance 5 task-selected
-vdgg_state_write 5 task-selected <loop_count> "T1: title"
+vdgg_task_begin "T1: title" path/to/file1 path/to/file2
 ```
+
+`vdgg_task_begin` records the task in state, snapshots a baseline of the allowlisted files, and arms the task gate. The hook blocks implementation edits until it has run.
 
 ## Step 6: Implement
 
@@ -254,15 +273,16 @@ Implement the selected task and write tests where appropriate.
 vdgg_state_advance 6 implementing
 ```
 
-Do not run tests in `implementing`; the hook blocks test commands until Step 7.
+Do not run tests in `implementing`; the hook blocks test commands until Step 7. Edit/Write outside the task allowlist is blocked; if the scope legitimately grew, return to Step 5 and run `vdgg_task_begin` again with the wider allowlist.
 
 ## Step 7: Verify
 
-Before running verification, state 1 to 3 concrete checks. Then run tests, builds, smoke checks, or manual checks as appropriate.
+Before running verification, state 1 to 3 concrete checks. Then run them through the task gate, which re-checks the allowlist and records a pass only when the command succeeds. Pass the command as separate shell words, for example `vdgg_task_gate npm test`, or use `vdgg_task_gate bash -lc 'command with pipes'`.
 
 ```bash
 # [VibesDeGoGo! Step 7 Start] step=7, phase=testing, loop=0
 vdgg_state_advance 7 testing
+vdgg_task_gate <verification-command> [args...]
 ```
 
 After all checks pass, run the `simplify` skill as a quality gate. The PostToolUse hook records a sentinel file:
@@ -277,7 +297,50 @@ Outcomes:
 - `modified=0`: verified transition is allowed.
 - `modified=1`: verified transition is blocked; go through reflection and re-test.
 
-For environments that cannot use the `simplify` skill, the state helper also exposes `vdgg_state_mark_reviewed` as an explicit review marker. It is an auxiliary compatibility hook, not a replacement for the Claude Code simplify gate when that gate is available.
+When a task allowlist is active, `vdgg_state_advance 7 verified` is also blocked until `vdgg_task_gate` has passed for the current loop. If verification fails and the work must be redone from the baseline, `vdgg_task_rollback` reverts the allowlisted changes.
+
+For environments that cannot use the `simplify` skill, or when `.vdgg-target` configures an external reviewer, run the review through `vdgg_review_run`:
+
+```bash
+vdgg_review_run                      # runs REVIEW_COMMAND from .vdgg-target
+vdgg_review_run <command> [args...]  # runs an explicit review command
+```
+
+It writes the review sentinel only when the command exits 0. A purely manual review can still be recorded with `vdgg_state_mark_reviewed`. The verified gate accepts either sentinel — simplify or explicit review — and both are subject to the same rule: implementation edits after the review flip `modified=1` and route through reflection. Prefer the simplify skill when it is available; prefer a different vendor than the implementing model for external review. Sentinel files cannot be written directly; the hooks block Edit/Write/Bash writes to `.claude/.vdgg-*` paths.
+
+### simplify subagent consolidation
+
+The simplify skill's default Phase 1 (5 parallel angle finders, up to 8 candidates each) is the right call when ANY of these hold:
+
+- This is the FIRST simplify round (`loop_count=0`) on this feature.
+- The diff is large (>500 LOC), spans multiple files/layers, or touches contracts (API, persistence, concurrency, auth, security).
+- The previous round surfaced a high or medium finding (recall still matters this round).
+
+You MAY collapse the 5 angles into ONE comprehensive agent (or do the review inline without a subagent) when ALL of these hold:
+
+- This is a follow-up round (`loop_count` ≥ 1).
+- The previous round found only low-severity items, or no items.
+- The diff in this round is small (≤200 LOC) AND localized (1–2 files, 1–2 functions).
+- No concurrency, pasteboard, pointer, lifecycle, or contract surface is touched.
+
+When collapsing, state the reason in the user-facing text (e.g. "collapsing to 1 agent because loop=3 and previous round was low-only"). Do not collapse silently to save tokens or time.
+
+### simplify findings: severity-based response
+
+After simplify returns findings, classify each one and decide before editing:
+
+- **high**: correctness bug, data loss, race condition, security, contract regression.
+- **medium**: real bug with a narrow trigger, or a design that will break under reasonable use.
+- **low**: cosmetic, stale doc, log message wording, naming, dead branch, style.
+
+Response:
+
+- Any **high or medium** finding → fix it in implementation files. The sentinel will flip to `modified=1`, routing you through reflection — this is correct.
+- **All findings are low (or `[]`)** → DO NOT edit implementation files. Instead, write the findings to `tasks/vdgg/{id}/followup-r{loop_count}.md` and advance directly to `verified`. Low items become candidates for a separate followup PR.
+
+This stops convergence-loops on cosmetic findings while keeping the hook discipline intact: any implementation edit during testing still flips `modified=1`, so there is no escape hatch for high/medium.
+
+When listing findings, always assign an explicit `severity` field per finding so the classification is auditable. If simplify's own output omits severity, classify each finding yourself before deciding the response.
 
 After successful verification and simplify review:
 
@@ -328,6 +391,8 @@ vdgg_state_loop 6 implementing
 ```
 
 The hook checks that `progress.md` and `investigation-r{loop_count}.md` were updated during reflection.
+
+If the revised hypothesis changes the file scope, run `vdgg_task_begin` again with the new allowlist before editing. The task gate must pass again for the new loop before `verified`.
 
 ## Step 8: Progress And Validation Request
 
