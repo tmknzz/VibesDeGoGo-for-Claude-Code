@@ -277,7 +277,7 @@ Do not run tests in `implementing`; the hook blocks test commands until Step 7. 
 
 ## Step 7: Verify
 
-Before running verification, state 1 to 3 concrete checks. Then run them through the task gate, which re-checks the allowlist and records a pass only when the command succeeds. Pass the command as separate shell words, for example `vdgg_task_gate npm test`, or use `vdgg_task_gate bash -lc 'command with pipes'`.
+Before running verification, state the concrete checks you will run. Scale the count to the change's surface — roughly 1 to 3 for a small, localized change, more when it spans multiple files or touches a contract; do not stop at three if the surface is larger. At least one check must be one that would FAIL if the change were wrong — a boundary, error, or regression case, not only a happy-path confirmation. Then run them through the task gate, which re-checks the allowlist and records a pass only when the command succeeds. Pass the command as separate shell words, for example `vdgg_task_gate npm test`, or use `vdgg_task_gate bash -lc 'command with pipes'`.
 
 ```bash
 # [VibesDeGoGo! Step 7 Start] step=7, phase=testing, loop=0
