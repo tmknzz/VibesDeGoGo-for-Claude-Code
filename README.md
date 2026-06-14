@@ -1,18 +1,21 @@
 # VibesDeGoGo! for Claude Code
 
-VibesDeGoGo! for Claude Code is a state-and-hook workflow that keeps Claude
-Code moving until coding work is actually done, while stopping before
-constraint violations.
+**Make Claude Code finish the job — without cutting corners.**
 
-It exists because AI coding agents can skip the boring parts: requirements,
-investigation, verification, and clear handoff. VibesDeGoGo! turns those parts
-into rails.
+Claude Code is clever, but it doesn't always go the distance: it loses steam before the work is truly done, jumps ahead over steps it should have taken, and cuts corners that come back later as a nasty reversal. You think it's finished — then the whole thing unravels.
 
-The hooks are guardrails, not a sandbox: they mechanically block the common
-drift paths (out-of-scope edits, skipped verification and review, silent
-stops), and the task gate cross-checks actual file changes against the
-declared allowlist. Treat them as safety rails plus an audit trail, not as
-proof of correctness.
+VibesDeGoGo! for Claude Code answers with one thing: **enforcement.** It's a state-and-hook workflow that won't let the agent skip the boring-but-load-bearing parts — requirements, investigation, one task at a time, verification — and physically blocks the moves that cause the unravel.
+
+One asymmetry runs the whole thing:
+
+- **Don't stop to ask permission** — no "can I continue?", it keeps moving.
+- **Do stop before a constraint violation** — a new dependency, touching auth / persistence / billing / security, a destructive op, or jumping a step: it halts and asks first.
+
+This isn't a polite request in a prompt — it's enforced by hooks (`PreToolUse` / `PostToolUse` / `Stop`) plus a state file, with a task gate that cross-checks the actual file changes against the allowlist you declared. Try to skip a step or bend the workflow and the hooks stop the tool call cold. (Honest caveat: treat this as strong rails plus an audit trail, not a sandbox or a proof of correctness.)
+
+Just bash + jq. No SaaS, no account, no API key, no telemetry. MIT, and free.
+
+> Where this comes from: I don't write code — I have never written or read a line of it. The tools in this repo are real, tested, and open source anyway, because the rails do the reading I can't: every step verified, tests must pass, nothing ships unreviewed. That's the point — VibesDeGoGo! is how someone who can't code keeps an agent honest.
 
 ## Core Flow
 
@@ -93,7 +96,14 @@ sudo dnf install jq           # Fedora / RHEL
 bash tests/run-all.sh
 ```
 
+## Optional: MAGI
+
+If you also install **MAGI** (a small open-source 3-persona deliberation skill), VibesDeGoGo! uses it at two points — and silently skips it if you don't: **Step 0** to deliberate a genuinely split, high-stakes decision (it hands back material; you still decide), and **Step 7** as the review gate for subjective artifacts (docs, copy, design). MAGI judges desirability, not code correctness. → https://github.com/tmknzz/MAGI
+
 ## Status
 
-This repository is the Claude Code-focused edition. The Codex edition lives
-separately as `VibesDeGoGo-for-Codex`.
+This repository is the Claude Code-focused edition. The Codex edition lives separately at [VibesDeGoGo-for-Codex](https://github.com/tmknzz/VibesDeGoGo-for-Codex).
+
+## Support
+
+It's free, and it stays free. If it ever saves you a weekend, a coffee is welcome — never expected.
