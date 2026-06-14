@@ -1,21 +1,15 @@
 # VibesDeGoGo! for Claude Code
 
-**Make Claude Code finish the job — without cutting corners.**
-
-Claude Code is clever, but it doesn't always go the distance: it loses steam before the work is truly done, jumps ahead over steps it should have taken, and cuts corners that come back later as a nasty reversal. You think it's finished — then the whole thing unravels.
-
-VibesDeGoGo! for Claude Code answers with one thing: **enforcement.** It's a state-and-hook workflow that won't let the agent skip the boring-but-load-bearing parts — requirements, investigation, one task at a time, verification — and physically blocks the moves that cause the unravel.
+A state-and-hook workflow for Claude Code. It keeps the agent moving through requirements, investigation, implementation, verification, and commit, but stops it before skipped steps, skipped verification, or scope drift.
 
 One asymmetry runs the whole thing:
 
-- **Don't stop to ask permission** — no "can I continue?", it keeps moving.
-- **Do stop before a constraint violation** — a new dependency, touching auth / persistence / billing / security, a destructive op, or jumping a step: it halts and asks first.
+- Don't stop to ask permission — no "can I continue?", it keeps moving.
+- Do stop before a constraint violation — a new dependency, touching auth / persistence / billing / security, a destructive op, or jumping a step: it halts and asks first.
 
-This isn't a polite request in a prompt — it's enforced by hooks (`PreToolUse` / `PostToolUse` / `Stop`) plus a state file, with a task gate that cross-checks the actual file changes against the allowlist you declared. Try to skip a step or bend the workflow and the hooks stop the tool call cold. (Honest caveat: treat this as strong rails plus an audit trail, not a sandbox or a proof of correctness.)
+The rules are enforced by hooks (`PreToolUse` / `PostToolUse` / `Stop`) plus a state file, not by prompt text, and a task gate cross-checks the actual file changes against the allowlist you declared. The hooks are a guardrail, not a sandbox — strong rails plus an audit trail, not proof of correctness.
 
-Just bash + jq. No SaaS, no account, no API key, no telemetry. MIT, and free.
-
-> Where this comes from: I don't write code — I have never written or read a line of it. The tools in this repo are real, tested, and open source anyway, because the rails do the reading I can't: every step verified, tests must pass, nothing ships unreviewed. That's the point — VibesDeGoGo! is how someone who can't code keeps an agent honest.
+bash + jq. No account, keys, or telemetry. MIT.
 
 ## Core Flow
 
@@ -103,7 +97,3 @@ If you also install **MAGI** (a small open-source 3-persona deliberation skill),
 ## Status
 
 This repository is the Claude Code-focused edition. The Codex edition lives separately at [VibesDeGoGo-for-Codex](https://github.com/tmknzz/VibesDeGoGo-for-Codex).
-
-## Support
-
-It's free, and it stays free. If it ever saves you a weekend, a coffee is welcome — never expected.
