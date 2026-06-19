@@ -32,6 +32,17 @@ AUTO_PUSH=false
 # Extra test command regex blocked during implementing phase.
 TEST_COMMAND_PATTERN="<extended regex>"
 
+# Step 0 Grill Me toggle. Grill Me is an optional question-driven interrogator
+# that walks the decision tree one branch at a time and runs before drafting
+# Goal / Constraints / Acceptance. See SKILL.md "Step 0 Helper: Grill Me".
+#   off  (default) — do not run Grill Me.
+#   on             — always run Grill Me at Step 0.
+#   auto           — run when the Consultation entry conditions hold
+#                    (ambiguous goal, subjective work, high stakes,
+#                    multiple defensible directions).
+# Treated as off if the Grill Me skill is not installed.
+GRILLME=auto
+
 # Optional external review gate for Step 7. The command must be read-only
 # (findings only, no edits) and exit 0 only when the review passes. Run it
 # with `vdgg_review_run` (no arguments), which writes the review sentinel on
