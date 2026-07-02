@@ -30,6 +30,7 @@
 
 ### Added
 
+- Formation (executor tiers): optional `STEP6_EXECUTOR_TIERS` in `.vdgg-target` declares a cheapest-first executor ladder for Step 6, escalating automatically on repeated failure. Unset means unchanged behavior. Claude Code edition only — the Codex edition has no delegated executor mechanism.
 - Step 7 now requires at least one falsifying verification check (boundary/error/regression) and scales the check count to the change surface instead of capping at three.
 - Initial Claude-Code-only split from VibesDeGoGo!.
 - Claude Code skill, hook scripts, references, and smoke tests.
