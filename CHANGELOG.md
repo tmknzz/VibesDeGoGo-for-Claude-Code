@@ -34,3 +34,4 @@
 - Step 7 now requires at least one falsifying verification check (boundary/error/regression) and scales the check count to the change surface instead of capping at three.
 - Initial Claude-Code-only split from VibesDeGoGo!.
 - Claude Code skill, hook scripts, references, and smoke tests.
+- REVIEW_COMMAND guidance now recommends a security perspective for publicly shipped code, with an updated example; simplify explicitly does not cover security.

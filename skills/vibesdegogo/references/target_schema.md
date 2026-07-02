@@ -36,7 +36,10 @@ TEST_COMMAND_PATTERN="<extended regex>"
 # (findings only, no edits) and exit 0 only when the review passes. Run it
 # with `vdgg_review_run` (no arguments), which writes the review sentinel on
 # success. Use a different vendor than the implementing model when possible.
-REVIEW_COMMAND="codex exec --sandbox read-only 'review the working tree diff; exit non-zero on blocking findings'"
+# For code that ships to other machines or handles user data, include a
+# security perspective in the review prompt, since the simplify gate does
+# not cover security.
+REVIEW_COMMAND="codex exec --sandbox read-only 'review the working tree diff for correctness and security (injection, secrets exposure, unsafe file/network/exec operations, data loss); exit non-zero on blocking findings'"
 
 # Optional delegated step executors. When set, the agent runs the command for
 # that step instead of doing the step inline, then validates the artifacts
