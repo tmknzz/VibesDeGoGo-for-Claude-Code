@@ -454,6 +454,16 @@ case "$PHASE" in
             fi
         fi
         ;;
+
+    *)
+        # Unknown phase: fail closed. Read-like tools already returned 0 at the
+        # tool-name switch, so only mutating tools (Edit/Write/Bash/Agent) reach
+        # here. A crafted state file (or any future phase the guards don't know)
+        # must not silently disable enforcement. vdgg_state_write also rejects
+        # unknown phases at the source; this is defense in depth.
+        echo "VibesDeGoGo! [${VDGG_ID:-unknown}]: Unknown workflow phase '${PHASE}'. Tool call blocked by VibesDeGoGo! hook." >&2
+        exit 2
+        ;;
 esac
 
 exit 0

@@ -109,6 +109,11 @@ write_state investigating 3
 STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"cat .claude/.vdgg-state-test-id"}}')
 assert_exit_code 0 "$STATUS" "genuine sidecar read is allowed"
 
+# P1-Both-3: an unknown phase must fail closed for mutating tools.
+write_state impl 6
+STATUS=$(run_hook '{"tool_name":"Edit","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"file_path":"'"$TMPDIR_VDGG"'/src/whatever.sh"}}')
+assert_exit_code 2 "$STATUS" "unknown phase fails closed for edits"
+
 write_state_with_allowlist() {
     local phase="$1" step="$2" loop="${3:-0}"
     write_state "$phase" "$step" "$loop"

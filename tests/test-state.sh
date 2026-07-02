@@ -90,4 +90,13 @@ set -e
 assert_exit_code 0 "$STATUS" "review_run uses REVIEW_COMMAND from .vdgg-target"
 assert_file_exists ".claude/.vdgg-review-sentinel-${ID2}-0" "target-config review writes sentinel"
 rm -f .vdgg-target
+
+# P1-Both-3: vdgg_state_write rejects an unknown phase (enumeration, not regex).
+CUR_STEP=$(grep '^step=' ".claude/.vdgg-state-${ID2}" | cut -d= -f2)
+set +e
+vdgg_state_write "$CUR_STEP" bogusphase 0 >/dev/null 2>&1
+STATUS=$?
+set -e
+assert_exit_code 1 "$STATUS" "unknown phase is rejected by vdgg_state_write"
+
 vdgg_state_clear >/dev/null 2>&1

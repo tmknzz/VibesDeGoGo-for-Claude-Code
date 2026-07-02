@@ -256,10 +256,16 @@ vdgg_state_write() {
         echo "vdgg-state: invalid or blocked state transition" >&2
         return 1
     fi
-    if ! [[ "$new_phase" =~ ^[a-z][a-z0-9-]*$ ]]; then
-        echo "vdgg-state: invalid or blocked state transition" >&2
-        return 1
-    fi
+    # Phase must be one of the known workflow phases. An open regex would let a
+    # same-step transition move into an arbitrary phase name that no pretool
+    # case arm matches, silently disabling every edit/commit/test guard.
+    case "$new_phase" in
+        declare|requirements|investigating|planning|task-selected|implementing|testing|reflection|verified|progress|commit) ;;
+        *)
+            echo "vdgg-state: invalid or blocked state transition" >&2
+            return 1
+            ;;
+    esac
     if ! [[ "$new_loop_count" =~ ^[0-9]+$ ]]; then
         echo "vdgg-state: invalid or blocked state transition" >&2
         return 1
