@@ -131,21 +131,46 @@ if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; then
     fi
 fi
 if [ "$TOOL_NAME" = "Bash" ]; then
-    # Bash can also mutate sidecar files through redirection or file operations.
-    # `git commit` is exempt: the command text may legitimately mention sidecar
-    # paths inside the commit message, and git commit does not write to those
-    # tracked files directly. Commit phase rules and the implementing/testing
-    # commit-blocking pattern still apply elsewhere.
-    if echo "$COMMAND" | grep -qE '(^|[^a-zA-Z0-9_-])git[[:space:]]+commit($|[[:space:]])'; then
-        :
-    elif echo "$COMMAND" | grep -qE '\.claude/\.vdgg-'; then
-        # Reads are allowed; writes must go through vdgg_state_* helpers.
-        # `>[^&]` excludes fd-merge redirects (2>&1, >&2) which are not destructive.
-        if echo "$COMMAND" | grep -qE '(>[^&]|tee[[:space:]]|sed[[:space:]]+-i|mv[[:space:]]|cp[[:space:]]|rm[[:space:]])'; then
-            echo "VibesDeGoGo! [${VDGG_ID}]: Direct edits to VibesDeGoGo! sidecar files are blocked. Use vdgg_state_* helpers." >&2
+    # Sidecar files (.claude/.vdgg-*) may only be written through vdgg_state_*
+    # helpers, never directly, or the review/gate sentinels could be forged.
+    # Check each shell segment independently so a `git commit` segment (whose
+    # message may legitimately mention a sidecar path) cannot shield a
+    # sidecar-mutating segment in the same command line, e.g.
+    #   git commit -m x && rm -f .claude/.vdgg-active
+    # Whitelist model (fail-closed): a segment that mentions a sidecar path is
+    # allowed only when it is a git-commit segment, or a genuine read -- a
+    # leading read-only verb with no output redirection or tee. Everything else
+    # (interpreters like python/perl, dd/install/truncate, redirects, file ops)
+    # is denied. Known limit: a segment that hides the sidecar path behind a
+    # shell variable or command substitution can evade the literal match; see
+    # references/hook_rules.md.
+    _vdgg_segs="$COMMAND"
+    _vdgg_segs="${_vdgg_segs//&&/$'\n'}"
+    _vdgg_segs="${_vdgg_segs//||/$'\n'}"
+    _vdgg_segs="${_vdgg_segs//;/$'\n'}"
+    _vdgg_segs="${_vdgg_segs//|/$'\n'}"
+    while IFS= read -r _vdgg_seg; do
+        case "$_vdgg_seg" in
+            *".claude/.vdgg-"*) ;;
+            *) continue ;;
+        esac
+        if echo "$_vdgg_seg" | grep -qE '(^|[^a-zA-Z0-9_-])git[[:space:]]+commit($|[[:space:]])'; then
+            continue
+        fi
+        _vdgg_verb=$(printf '%s' "$_vdgg_seg" | sed -E 's/^[[:space:]]*//; s/[[:space:]].*//')
+        _vdgg_read_ok=0
+        case "$_vdgg_verb" in
+            cat|grep|egrep|fgrep|test|'['|ls|head|tail|wc|diff|cmp|stat|od|hexdump|file|realpath|readlink)
+                if ! echo "$_vdgg_seg" | grep -qE '(>[^&]|>>|(^|[[:space:]])tee([[:space:]]|$))'; then
+                    _vdgg_read_ok=1
+                fi
+                ;;
+        esac
+        if [ "$_vdgg_read_ok" -ne 1 ]; then
+            echo "VibesDeGoGo! [${VDGG_ID}]: Direct writes to VibesDeGoGo! sidecar files are blocked. Use vdgg_state_* helpers." >&2
             exit 2
         fi
-    fi
+    done <<< "$_vdgg_segs"
 fi
 
 # Guard 2: validate Step declarations in Bash state-transition commands.

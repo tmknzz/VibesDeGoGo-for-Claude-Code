@@ -89,6 +89,26 @@ write_state testing 7
 STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"cat > .claude/.vdgg-simplify-sentinel-test-id-0 <<EOF\nmodified=0\nEOF"}}')
 assert_exit_code 2 "$STATUS" "bash sentinel forgery is blocked"
 
+# P1-Both-2: a `git commit` segment must not shield a sidecar-mutating segment
+# in the same command line.
+write_state commit 9
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"git commit -m x && rm -f .claude/.vdgg-active"}}')
+assert_exit_code 2 "$STATUS" "git commit does not shield sidecar deletion in same command"
+
+# P1-CC-1: interpreter/tool-based sentinel forgery (not in the old blacklist) is blocked.
+write_state testing 7
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"dd of=.claude/.vdgg-simplify-sentinel-test-id-0"}}')
+assert_exit_code 2 "$STATUS" "dd sentinel forgery is blocked"
+
+write_state testing 7
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"install -m 644 /dev/null .claude/.vdgg-simplify-sentinel-test-id-0"}}')
+assert_exit_code 2 "$STATUS" "install sentinel forgery is blocked"
+
+# Regression: a genuine sidecar read stays allowed.
+write_state investigating 3
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"cat .claude/.vdgg-state-test-id"}}')
+assert_exit_code 0 "$STATUS" "genuine sidecar read is allowed"
+
 write_state_with_allowlist() {
     local phase="$1" step="$2" loop="${3:-0}"
     write_state "$phase" "$step" "$loop"
