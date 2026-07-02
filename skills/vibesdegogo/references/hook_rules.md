@@ -4,17 +4,26 @@ This file documents the behavior implemented by the hooks.
 
 ## Common Guards
 
-Sidecar files are protected. The hooks block direct edits (Edit/Write tools and
-Bash writes such as redirection, `tee`, `sed -i`, `mv`, `cp`, `rm`) to every
-path matching:
+Sidecar files are protected. Edit/Write tools targeting any path matching:
 
 ```text
 .claude/.vdgg-*
 ```
 
+are blocked outright. Bash commands are split into shell segments (on `&&`, `||`,
+`;`, `|`, newline) and each segment that mentions a sidecar path is checked with
+a **whitelist** (fail-closed): the segment is allowed only if it is a `git commit`
+(whose message may mention a sidecar path without writing it) or a genuine read —
+a leading read-only verb (`cat`, `grep`, `test`, `ls`, `head`, `tail`, …) with no
+output redirection or `tee`. Every other form — interpreters (`python`, `perl`),
+`dd`, `install`, `truncate`, redirects, file ops — is denied. Segmenting means a
+`git commit` cannot shield a sidecar-mutating segment in the same command line.
+
 This covers state files, the active marker, and the simplify/review sentinels —
 so the review gate cannot be satisfied by forging a sentinel. Use `vdgg_state_*`
-helpers instead.
+helpers instead. The same write protection also applies to `.vdgg-target`
+(reads stay allowed), so the agent cannot self-author `REVIEW_COMMAND` or a
+`STEP*_EXECUTOR_COMMAND` to forge a passing review or run an arbitrary command.
 
 Step declarations are validated for Bash commands that call:
 
@@ -101,3 +110,4 @@ are excluded). Sentinels cannot be written directly; see Common Guards.
 
 - The Stop hook depends on Claude Code providing `cwd` and `transcript_path` in hook JSON. If Claude Code changes that contract, the Stop hook may become a no-op rather than a blocker.
 - The reflection gate compares whole-second file mtimes; if `progress.md` or `investigation-r*.md` is written in the same second as the state transition, the return to implementing can be blocked once — retrying a moment later succeeds.
+- The sidecar write guard matches the literal `.claude/.vdgg-` path in the Bash command text. A segment that hides the path behind a shell variable or command substitution (e.g. `D=.claude; rm -f "$D/.vdgg-active"`) can evade the match. The hook raises the cost of forgery but is a guardrail, not a security boundary; it does not sandbox a determined agent.

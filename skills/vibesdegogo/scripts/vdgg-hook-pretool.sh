@@ -88,8 +88,8 @@ _vdgg_normalize_project_path() {
 # Extract only the fields needed for the current tool type.
 
 case "$TOOL_NAME" in
-    Edit|Write)
-        FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+    Edit|Write|NotebookEdit)
+        FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
         ;;
     Bash)
         COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
@@ -97,9 +97,16 @@ case "$TOOL_NAME" in
     Agent)
         # Agent calls are phase-gated below.
         ;;
-    *)
-        # Read, Glob, Grep, and other non-mutating tools are always allowed.
+    Read|Glob|Grep|LS|NotebookRead|TodoWrite|WebFetch|WebSearch|BashOutput|KillShell)
+        # Known read-only / non-file-mutating tools are always allowed.
         exit 0
+        ;;
+    *)
+        # Unknown tool: it may mutate files. Extract a file path if the tool
+        # exposes one and let the phase guards below apply (fail-closed for file
+        # writes). A read-only tool with no file path still falls through to the
+        # allow at the end, so this does not block genuine reads.
+        FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
         ;;
 esac
 
@@ -123,29 +130,57 @@ if [ -f "$ERROR_FLAG" ]; then
 fi
 
 # Guard 4: block direct edits to any .claude/.vdgg-* sidecar (state, active,
-# sentinels) in all phases. Sentinel forgery would bypass the review gate.
+# sentinels) and to .vdgg-target in all phases. Sentinel forgery would bypass
+# the review gate; and .vdgg-target holds trusted config (REVIEW_COMMAND,
+# STEP*_EXECUTOR_COMMAND) that is executed, so letting the agent write it would
+# let it self-author a passing review or an arbitrary command.
 if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; then
-    if [[ "$FILE_PATH" == *".claude/.vdgg-"* ]]; then
-        echo "VibesDeGoGo! [${VDGG_ID}]: Direct edits to VibesDeGoGo! sidecar files are blocked. Use vdgg_state_* helpers." >&2
+    if [[ "$FILE_PATH" == *".claude/.vdgg-"* ]] || [[ "$FILE_PATH" == *".vdgg-target" ]]; then
+        echo "VibesDeGoGo! [${VDGG_ID}]: Direct edits to VibesDeGoGo! sidecar/target files are blocked. Use vdgg_state_* helpers; .vdgg-target must be set by a human." >&2
         exit 2
     fi
 fi
 if [ "$TOOL_NAME" = "Bash" ]; then
-    # Bash can also mutate sidecar files through redirection or file operations.
-    # `git commit` is exempt: the command text may legitimately mention sidecar
-    # paths inside the commit message, and git commit does not write to those
-    # tracked files directly. Commit phase rules and the implementing/testing
-    # commit-blocking pattern still apply elsewhere.
-    if echo "$COMMAND" | grep -qE '(^|[^a-zA-Z0-9_-])git[[:space:]]+commit($|[[:space:]])'; then
-        :
-    elif echo "$COMMAND" | grep -qE '\.claude/\.vdgg-'; then
-        # Reads are allowed; writes must go through vdgg_state_* helpers.
-        # `>[^&]` excludes fd-merge redirects (2>&1, >&2) which are not destructive.
-        if echo "$COMMAND" | grep -qE '(>[^&]|tee[[:space:]]|sed[[:space:]]+-i|mv[[:space:]]|cp[[:space:]]|rm[[:space:]])'; then
-            echo "VibesDeGoGo! [${VDGG_ID}]: Direct edits to VibesDeGoGo! sidecar files are blocked. Use vdgg_state_* helpers." >&2
+    # Sidecar files (.claude/.vdgg-*) may only be written through vdgg_state_*
+    # helpers, never directly, or the review/gate sentinels could be forged.
+    # Check each shell segment independently so a `git commit` segment (whose
+    # message may legitimately mention a sidecar path) cannot shield a
+    # sidecar-mutating segment in the same command line, e.g.
+    #   git commit -m x && rm -f .claude/.vdgg-active
+    # Whitelist model (fail-closed): a segment that mentions a sidecar path is
+    # allowed only when it is a git-commit segment, or a genuine read -- a
+    # leading read-only verb with no output redirection or tee. Everything else
+    # (interpreters like python/perl, dd/install/truncate, redirects, file ops)
+    # is denied. Known limit: a segment that hides the sidecar path behind a
+    # shell variable or command substitution can evade the literal match; see
+    # references/hook_rules.md.
+    _vdgg_segs="$COMMAND"
+    _vdgg_segs="${_vdgg_segs//&&/$'\n'}"
+    _vdgg_segs="${_vdgg_segs//||/$'\n'}"
+    _vdgg_segs="${_vdgg_segs//;/$'\n'}"
+    _vdgg_segs="${_vdgg_segs//|/$'\n'}"
+    while IFS= read -r _vdgg_seg; do
+        case "$_vdgg_seg" in
+            *".claude/.vdgg-"*|*".vdgg-target"*) ;;
+            *) continue ;;
+        esac
+        if echo "$_vdgg_seg" | grep -qE '(^|[^a-zA-Z0-9_-])git[[:space:]]+commit($|[[:space:]])'; then
+            continue
+        fi
+        _vdgg_verb=$(printf '%s' "$_vdgg_seg" | sed -E 's/^[[:space:]]*//; s/[[:space:]].*//')
+        _vdgg_read_ok=0
+        case "$_vdgg_verb" in
+            cat|grep|egrep|fgrep|test|'['|ls|head|tail|wc|diff|cmp|stat|od|hexdump|file|realpath|readlink)
+                if ! echo "$_vdgg_seg" | grep -qE '(>[^&]|>>|(^|[[:space:]])tee([[:space:]]|$))'; then
+                    _vdgg_read_ok=1
+                fi
+                ;;
+        esac
+        if [ "$_vdgg_read_ok" -ne 1 ]; then
+            echo "VibesDeGoGo! [${VDGG_ID}]: Direct writes to VibesDeGoGo! sidecar files are blocked. Use vdgg_state_* helpers." >&2
             exit 2
         fi
-    fi
+    done <<< "$_vdgg_segs"
 fi
 
 # Guard 2: validate Step declarations in Bash state-transition commands.
@@ -221,7 +256,7 @@ case "$PHASE" in
             exit 2
         fi
         # During declaration/requirements, only task files may be written.
-        if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; then
+        if [ -n "${FILE_PATH:-}" ]; then
             if [ -n "$FILE_PATH" ]; then
                 if [[ "$FILE_PATH" == ${TASKS_DIR}/* ]] || [[ "$FILE_PATH" == tasks/vdgg/${VDGG_ID}/* ]]; then
                     exit 0
@@ -244,7 +279,7 @@ case "$PHASE" in
 
     investigating|planning)
         # Investigation and planning may only update task documentation.
-        if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; then
+        if [ -n "${FILE_PATH:-}" ]; then
             if [ -n "$FILE_PATH" ]; then
                 if [[ "$FILE_PATH" == ${TASKS_DIR}/* ]] || [[ "$FILE_PATH" == tasks/vdgg/${VDGG_ID}/* ]]; then
                     exit 0
@@ -257,7 +292,7 @@ case "$PHASE" in
 
     task-selected)
         # Once a task is selected, advance to implementing before editing files.
-        if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; then
+        if [ -n "${FILE_PATH:-}" ]; then
             echo "VibesDeGoGo! [${VDGG_ID:-unknown}]: Tool call blocked by VibesDeGoGo! hook." >&2
             exit 2
         fi
@@ -266,7 +301,7 @@ case "$PHASE" in
     implementing|testing)
         # Implementation edits must stay inside the task allowlist declared by
         # vdgg_task_begin. Task notes under tasks/vdgg/{id}/ stay editable.
-        if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; then
+        if [ -n "${FILE_PATH:-}" ]; then
             if [ -n "$FILE_PATH" ] \
                 && [[ "$FILE_PATH" != ${TASKS_DIR}/* ]] \
                 && [[ "$FILE_PATH" != tasks/vdgg/${VDGG_ID}/* ]]; then
@@ -326,7 +361,7 @@ case "$PHASE" in
 
     reflection)
         # Reflection can only update retry investigation notes and progress.
-        if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; then
+        if [ -n "${FILE_PATH:-}" ]; then
             if [ -n "$FILE_PATH" ]; then
                 if [[ "$FILE_PATH" == "${TASKS_DIR}/progress.md" ]] \
                     || [[ "$FILE_PATH" == "${TASKS_DIR}"/investigation-r*.md ]]; then
@@ -371,7 +406,7 @@ case "$PHASE" in
 
     verified|progress|commit)
         # No code edits after verification; only progress/version metadata may change.
-        if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; then
+        if [ -n "${FILE_PATH:-}" ]; then
             if { [ "$PHASE" = "progress" ] || [ "$PHASE" = "commit" ]; } && [ -n "$FILE_PATH" ]; then
                 # progress.md remains editable for validation and commit notes.
                 if [[ "$FILE_PATH" == "${TASKS_DIR}/progress.md" ]]; then
@@ -428,6 +463,16 @@ case "$PHASE" in
                 fi
             fi
         fi
+        ;;
+
+    *)
+        # Unknown phase: fail closed. Read-like tools already returned 0 at the
+        # tool-name switch, so only mutating tools (Edit/Write/Bash/Agent) reach
+        # here. A crafted state file (or any future phase the guards don't know)
+        # must not silently disable enforcement. vdgg_state_write also rejects
+        # unknown phases at the source; this is defense in depth.
+        echo "VibesDeGoGo! [${VDGG_ID:-unknown}]: Unknown workflow phase '${PHASE}'. Tool call blocked by VibesDeGoGo! hook." >&2
+        exit 2
         ;;
 esac
 
