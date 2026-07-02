@@ -141,6 +141,21 @@ write_state investigating 3
 STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"grep -m1 ^REVIEW_COMMAND= .vdgg-target"}}')
 assert_exit_code 0 "$STATUS" "reading .vdgg-target is allowed"
 
+# P1-CC-2: NotebookEdit is gated like Edit/Write (no allowlist bypass).
+write_state implementing 6
+STATUS=$(run_hook '{"tool_name":"NotebookEdit","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"notebook_path":"'"$TMPDIR_VDGG"'/src/nb.ipynb"}}')
+assert_exit_code 2 "$STATUS" "NotebookEdit without allowlist is blocked in implementing"
+
+# P1-CC-2: an unknown mutating tool with a file_path is also gated (fail-closed).
+write_state implementing 6
+STATUS=$(run_hook '{"tool_name":"SomeFutureWriteTool","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"file_path":"'"$TMPDIR_VDGG"'/src/x.py"}}')
+assert_exit_code 2 "$STATUS" "unknown write tool without allowlist is blocked"
+
+# Regression: a known read-only tool still passes.
+write_state implementing 6
+STATUS=$(run_hook '{"tool_name":"Glob","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"pattern":"*.py"}}')
+assert_exit_code 0 "$STATUS" "read-only tool passes in implementing"
+
 write_state_with_allowlist() {
     local phase="$1" step="$2" loop="${3:-0}"
     write_state "$phase" "$step" "$loop"

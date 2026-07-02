@@ -88,8 +88,8 @@ _vdgg_normalize_project_path() {
 # Extract only the fields needed for the current tool type.
 
 case "$TOOL_NAME" in
-    Edit|Write)
-        FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+    Edit|Write|NotebookEdit)
+        FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
         ;;
     Bash)
         COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
@@ -97,9 +97,16 @@ case "$TOOL_NAME" in
     Agent)
         # Agent calls are phase-gated below.
         ;;
-    *)
-        # Read, Glob, Grep, and other non-mutating tools are always allowed.
+    Read|Glob|Grep|LS|NotebookRead|TodoWrite|WebFetch|WebSearch|BashOutput|KillShell)
+        # Known read-only / non-file-mutating tools are always allowed.
         exit 0
+        ;;
+    *)
+        # Unknown tool: it may mutate files. Extract a file path if the tool
+        # exposes one and let the phase guards below apply (fail-closed for file
+        # writes). A read-only tool with no file path still falls through to the
+        # allow at the end, so this does not block genuine reads.
+        FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
         ;;
 esac
 
@@ -249,7 +256,7 @@ case "$PHASE" in
             exit 2
         fi
         # During declaration/requirements, only task files may be written.
-        if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; then
+        if [ -n "${FILE_PATH:-}" ]; then
             if [ -n "$FILE_PATH" ]; then
                 if [[ "$FILE_PATH" == ${TASKS_DIR}/* ]] || [[ "$FILE_PATH" == tasks/vdgg/${VDGG_ID}/* ]]; then
                     exit 0
@@ -272,7 +279,7 @@ case "$PHASE" in
 
     investigating|planning)
         # Investigation and planning may only update task documentation.
-        if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; then
+        if [ -n "${FILE_PATH:-}" ]; then
             if [ -n "$FILE_PATH" ]; then
                 if [[ "$FILE_PATH" == ${TASKS_DIR}/* ]] || [[ "$FILE_PATH" == tasks/vdgg/${VDGG_ID}/* ]]; then
                     exit 0
@@ -285,7 +292,7 @@ case "$PHASE" in
 
     task-selected)
         # Once a task is selected, advance to implementing before editing files.
-        if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; then
+        if [ -n "${FILE_PATH:-}" ]; then
             echo "VibesDeGoGo! [${VDGG_ID:-unknown}]: Tool call blocked by VibesDeGoGo! hook." >&2
             exit 2
         fi
@@ -294,7 +301,7 @@ case "$PHASE" in
     implementing|testing)
         # Implementation edits must stay inside the task allowlist declared by
         # vdgg_task_begin. Task notes under tasks/vdgg/{id}/ stay editable.
-        if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; then
+        if [ -n "${FILE_PATH:-}" ]; then
             if [ -n "$FILE_PATH" ] \
                 && [[ "$FILE_PATH" != ${TASKS_DIR}/* ]] \
                 && [[ "$FILE_PATH" != tasks/vdgg/${VDGG_ID}/* ]]; then
@@ -354,7 +361,7 @@ case "$PHASE" in
 
     reflection)
         # Reflection can only update retry investigation notes and progress.
-        if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; then
+        if [ -n "${FILE_PATH:-}" ]; then
             if [ -n "$FILE_PATH" ]; then
                 if [[ "$FILE_PATH" == "${TASKS_DIR}/progress.md" ]] \
                     || [[ "$FILE_PATH" == "${TASKS_DIR}"/investigation-r*.md ]]; then
@@ -399,7 +406,7 @@ case "$PHASE" in
 
     verified|progress|commit)
         # No code edits after verification; only progress/version metadata may change.
-        if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; then
+        if [ -n "${FILE_PATH:-}" ]; then
             if { [ "$PHASE" = "progress" ] || [ "$PHASE" = "commit" ]; } && [ -n "$FILE_PATH" ]; then
                 # progress.md remains editable for validation and commit notes.
                 if [[ "$FILE_PATH" == "${TASKS_DIR}/progress.md" ]]; then
