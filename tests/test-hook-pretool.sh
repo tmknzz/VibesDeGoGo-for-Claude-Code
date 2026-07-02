@@ -114,6 +114,33 @@ write_state impl 6
 STATUS=$(run_hook '{"tool_name":"Edit","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"file_path":"'"$TMPDIR_VDGG"'/src/whatever.sh"}}')
 assert_exit_code 2 "$STATUS" "unknown phase fails closed for edits"
 
+# P0-2: .vdgg-target is write-protected even if the agent allowlists it, so it
+# cannot self-author REVIEW_COMMAND to forge the review gate.
+write_state implementing 6
+printf '.vdgg-target\n' > "$TMPDIR_VDGG/.claude/.vdgg-task-allowlist-test-id-0"
+cat > "$TMPDIR_VDGG/.claude/.vdgg-state-test-id" <<EOF
+step=6
+phase=implementing
+loop_count=0
+current_task=T
+task_allowlist_file=$TMPDIR_VDGG/.claude/.vdgg-task-allowlist-test-id-0
+task_base_ref=
+vdgg_id=test-id
+last_updated=2026-06-11T00:00:00Z
+EOF
+STATUS=$(run_hook '{"tool_name":"Edit","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"file_path":"'"$TMPDIR_VDGG"'/.vdgg-target"}}')
+assert_exit_code 2 "$STATUS" "editing .vdgg-target is blocked even when allowlisted"
+rm -f "$TMPDIR_VDGG/.claude/.vdgg-task-allowlist-test-id-0"
+
+write_state implementing 6
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"echo REVIEW_COMMAND=true > .vdgg-target"}}')
+assert_exit_code 2 "$STATUS" "bash write to .vdgg-target is blocked"
+
+# Regression: reading .vdgg-target stays allowed.
+write_state investigating 3
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"grep -m1 ^REVIEW_COMMAND= .vdgg-target"}}')
+assert_exit_code 0 "$STATUS" "reading .vdgg-target is allowed"
+
 write_state_with_allowlist() {
     local phase="$1" step="$2" loop="${3:-0}"
     write_state "$phase" "$step" "$loop"

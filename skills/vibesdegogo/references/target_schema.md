@@ -4,6 +4,8 @@
 
 It MUST NOT be `source`d. It is a repository-controlled file, so sourcing it (or otherwise evaluating its values as shell) would let an untrusted repository run arbitrary code. Read individual keys instead, e.g. `grep -m1 '^WORKFLOW=' .vdgg-target | sed -E 's/^[^=]*=//; s/^"(.*)"$/\1/'`, and validate the value before use. The hooks already parse it this way.
 
+`REVIEW_COMMAND` and `STEP*_EXECUTOR_COMMAND` are executed (via `bash -c` / as the step's command). Treat them as a trust boundary: only use these keys when a human placed the file. Do not use the executable keys from a `.vdgg-target` that shipped inside an untrusted cloned repository; if in doubt, show the value and get confirmation first. To keep the agent from self-authoring these keys to forge a passing review, the PreToolUse hook blocks Edit/Write/Bash writes to `.vdgg-target` (reads stay allowed), the same way it protects the `.claude/.vdgg-*` sidecars.
+
 ## Fields
 
 ```bash
