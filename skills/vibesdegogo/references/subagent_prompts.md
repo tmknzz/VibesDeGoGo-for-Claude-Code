@@ -56,6 +56,9 @@ Inputs:
 - investigation: <path>
 - todo: <path>
 - current_task: <task title>
+- failure notes (optional): <investigation-r*.md paths from earlier tiers>
+
+If failure notes are provided, read them first and do not repeat the approaches they document as failed.
 ```
 
 ## Reflection Researcher Subagent

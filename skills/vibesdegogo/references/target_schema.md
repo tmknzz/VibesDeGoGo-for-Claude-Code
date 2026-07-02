@@ -47,6 +47,15 @@ REVIEW_COMMAND="codex exec --sandbox read-only 'review the working tree diff; ex
 STEP3_EXECUTOR_COMMAND="qwen -p '<investigation prompt from subagent_prompts.md with paths filled in>'"
 STEP4_EXECUTOR_COMMAND=""
 STEP6_EXECUTOR_COMMAND=""
+
+# Optional Formation for Step 6: an ordered, |-separated list of executor
+# commands, cheapest first. The literal tier "inline" is reserved and means
+# the orchestrating agent implements the task itself. Non-inline entries use
+# the same command/placeholder conventions as STEP6_EXECUTOR_COMMAND. When
+# set, STEP6_EXECUTOR_TIERS takes precedence over STEP6_EXECUTOR_COMMAND
+# (which behaves like a single-tier Formation); when unset, behavior is
+# unchanged. Escalation rules live in SKILL.md ("Formation (executor tiers)").
+STEP6_EXECUTOR_TIERS="<local-llm-cli> -p '<implementation prompt>'|<stronger-model-cli> -p '<implementation prompt>'|inline"
 ```
 
 ## Example: iOS Or macOS App

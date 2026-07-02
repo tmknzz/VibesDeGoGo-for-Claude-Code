@@ -30,6 +30,18 @@ Trigger phrases include `/VibesDeGoGo!`, "use VibesDeGoGo!", and similar request
 
 Steps 3, 4, and 6 communicate only through files under `tasks/vdgg/{id}/`, so their executor is swappable. When `.vdgg-target` sets `STEP3_EXECUTOR_COMMAND`, `STEP4_EXECUTOR_COMMAND`, or `STEP6_EXECUTOR_COMMAND` (see `references/target_schema.md`), run that command for the step instead of doing the work inline, using the matching prompt from `references/subagent_prompts.md` with paths filled in. Before advancing, validate the executor's artifacts yourself: the output file exists and contains the required headings; for Step 6, the task allowlist and `vdgg_task_gate` still apply, which catches any out-of-allowlist edits the executor made. Steps 1, 2, 5, 8, and 9 are never delegated.
 
+### Formation (executor tiers)
+
+Activation: when `.vdgg-target` sets `STEP6_EXECUTOR_TIERS` (see `references/target_schema.md`), Step 6 uses a tier ladder instead of a single executor. The value is an ordered `|`-separated list of executor commands, cheapest first; the reserved terminal tier `inline` means the agent implements the task itself. When `STEP6_EXECUTOR_TIERS` is unset, behavior is exactly as before (single `STEP6_EXECUTOR_COMMAND` or inline work). When both are set, `STEP6_EXECUTOR_TIERS` wins.
+
+Start tier: each task starts at tier 1. Exception — the agent MAY start a task at a higher tier when the task is clearly heavyweight: contract changes (API, persistence, auth, security), changes spanning multiple modules, or concurrency-sensitive work. State the chosen start tier and the reason in the user-facing text.
+
+Escalation rule: the first verification failure of a task stays on the same tier — go through reflection (Step 6-R) and retry on that tier. When the same task fails verification a second time (the re-implementation that would run at loop=2), escalate to the next tier: run `vdgg_task_rollback` to restore the baseline so the higher tier re-implements cleanly, and pass the accumulated `investigation-r*.md` notes to the next tier's prompt (the `failure notes` input in `references/subagent_prompts.md`). `inline` is the last tier and follows the normal flow with no further escalation. If the ladder does not end with `inline`, the last configured tier is treated the same way — its further failures do not escalate; stay on that tier and continue the normal reflection loop.
+
+Review ordering: run the external review (`REVIEW_COMMAND` / `vdgg_review_run`) only after `vdgg_task_gate` verification has passed, so failed cheap-tier attempts never consume external review quota. On review findings (high/medium), the CURRENT tier applies the findings first; if the review rejects the work a second time, escalate one tier (same rollback-and-handoff procedure).
+
+Record keeping: record in `progress.md`, per task, the settling tier and loop count (e.g. `T1: settled at tier 1, loop=0` / `T2: escalated to tier 2, loop=2`). The final completion report must include a one-line-per-task Formation summary in the same form.
+
 ## Standard-First Contract
 
 For code changes, Step 0 Constraints must include the following default policy unless the user explicitly overrides it:
