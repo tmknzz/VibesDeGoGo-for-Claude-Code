@@ -314,7 +314,7 @@ Implement the selected task and write tests where appropriate.
 vdgg_state_advance 6 implementing
 ```
 
-Do not run tests in `implementing`; the hook blocks test commands until Step 7. Edit/Write outside the task allowlist is blocked; if the scope legitimately grew, return to Step 5 and run `vdgg_task_begin` again with the wider allowlist.
+Do not run tests in `implementing`; the hook blocks test commands until Step 7. Edit/Write outside the task allowlist is blocked. `vdgg_task_begin` can only (re)arm at Step 5 — the state machine rejects it from `implementing`/`reflection` (6 -> 5 is not a legal transition). If the scope legitimately grew mid-task, either narrow the change to fit the current allowlist, or finish this task through Step 8 and select the extra scope as a new task at Step 5 (8 -> 5) with the right allowlist.
 
 ## Step 7: Verify
 
@@ -435,7 +435,7 @@ vdgg_state_loop 6 implementing
 
 The hook checks that `progress.md` and `investigation-r{loop_count}.md` were updated during reflection.
 
-If the revised hypothesis changes the file scope, run `vdgg_task_begin` again with the new allowlist before editing. The task gate must pass again for the new loop before `verified`.
+If the revised hypothesis needs files outside the current allowlist, do not try to widen the allowlist in place — `vdgg_task_begin` cannot re-arm outside Step 5 and will fail loudly. Adapt the fix to the current allowlist (e.g. downgrade an optional cleanup to a followup note), or complete/close this task and take the wider scope as a new task via Step 8 -> Step 5. The task gate must pass again for the new loop before `verified`.
 
 ## Step 8: Progress And Validation Request
 
