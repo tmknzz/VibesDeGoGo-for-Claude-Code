@@ -317,7 +317,7 @@ vdgg_state_advance 4 planning
 
 ## Step 5: Select One Task
 
-Choose one task from `todo.md`. The task must be small enough to complete implementation, tests, and verification in one Step 6 to Step 8 loop; split it before Step 6 if it is not. Declare an allowlist of every implementation/test/documentation file this task is allowed to change; keep it narrow and task-specific. Task notes under `tasks/vdgg/{id}/` never need allowlisting.
+Choose one task from `todo.md`. The task must be small enough to complete implementation, tests, and verification in one Step 6 to Step 8 loop; split it before Step 6 if it is not. Declare an allowlist of every implementation/test/documentation file this task is allowed to change; keep it narrow and task-specific. Task notes under `tasks/vdgg/{id}/` never need allowlisting. If the task changes an interface, enum, type, or signature, also include the test file(s) that assert it in the allowlist, so a needed test update does not hit the re-arm wall mid-task.
 
 ```bash
 # [VibesDeGoGo! Step 5 Start] step=5, phase=task-selected, loop=0
@@ -340,7 +340,9 @@ Do not run tests in `implementing`; the hook blocks test commands until Step 7. 
 
 ## Step 7: Verify
 
-Before running verification, state the concrete checks you will run. Scale the count to the change's surface — roughly 1 to 3 for a small, localized change, more when it spans multiple files or touches a contract; do not stop at three if the surface is larger. At least one check must be one that would FAIL if the change were wrong — a boundary, error, or regression case, not only a happy-path confirmation. Then run them through the task gate, which re-checks the allowlist and records a pass only when the command succeeds. Pass the command as separate shell words, for example `vdgg_task_gate npm test`, or use `vdgg_task_gate bash -lc 'command with pipes'`.
+Before running verification, state the concrete checks you will run. Scale the count to the change's surface — roughly 1 to 3 for a small, localized change, more when it spans multiple files or touches a contract; do not stop at three if the surface is larger. At least one check must be one that would FAIL if the change were wrong — a boundary, error, or regression case, not only a happy-path confirmation. Then run them through the task gate, which re-checks the allowlist and records a pass only when the command succeeds. Pass the command as separate shell words, for example `vdgg_task_gate npm test`, or use `vdgg_task_gate bash -lc 'set -o pipefail; command with pipes'`.
+
+A verification command with a pipe that omits `set -o pipefail` can hide a failure in an earlier pipeline stage behind a successful final stage, so the gate records a false pass.
 
 ```bash
 # [VibesDeGoGo! Step 7 Start] step=7, phase=testing, loop=0
@@ -379,16 +381,16 @@ The simplify skill's default Phase 1 (5 parallel angle finders, up to 8 candidat
 
 - This is the FIRST simplify round (`loop_count=0`) on this feature.
 - The diff is large (>500 LOC), spans multiple files/layers, or touches contracts (API, persistence, concurrency, auth, security).
-- The previous round surfaced a high or medium finding (recall still matters this round).
+- An unresolved high or medium finding from the previous round still applies to code being changed in this round (recall still matters there).
 
 You MAY collapse the 5 angles into ONE comprehensive agent (or do the review inline without a subagent) when ALL of these hold:
 
 - This is a follow-up round (`loop_count` ≥ 1).
-- The previous round found only low-severity items, or no items.
+- No unresolved high or medium finding from the previous round still applies to code being changed in this round.
 - The diff in this round is small (≤200 LOC) AND localized (1–2 files, 1–2 functions).
 - No concurrency, pasteboard, pointer, lifecycle, or contract surface is touched.
 
-When collapsing, state the reason in the user-facing text (e.g. "collapsing to 1 agent because loop=3 and previous round was low-only"). Do not collapse silently to save tokens or time.
+When collapsing, state the reason in the user-facing text (e.g. "collapsing to 1 agent because loop=3 and no unresolved high/medium finding touches this round's diff"). Do not collapse silently to save tokens or time.
 
 ### simplify findings: severity-based response
 
@@ -427,7 +429,9 @@ Reflection is mandatory after failed verification or simplify changes.
 
 At the beginning of reflection, start a researcher subagent for root-cause investigation unless self-maintenance mode explicitly allows skipping it for a mechanical typo/path issue.
 
-The researcher must write:
+Lightweight branch: when reflection was triggered by review/simplify findings rather than a test failure, skip the researcher subagent — write `investigation-r{loop_count}.md` directly from the review findings (classify each finding, then state the one fix) instead. A test-failure-triggered reflection still requires the researcher subagent as above. Either way, `investigation-r{loop_count}.md` and `progress.md` must still be written; the hook checks apply the same regardless of which path produced them.
+
+The researcher (or, on the lightweight branch, the agent itself) must write:
 
 ```text
 tasks/vdgg/{id}/investigation-r{loop_count}.md
