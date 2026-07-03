@@ -175,6 +175,28 @@ Loop until the WHAT is agreed:
 
 Do not relitigate a settled point, and do not stall: drive toward convergence. When the WHAT is agreed, leave consultation mode and write `requirements.md`. For subjective artifacts, record in Acceptance what "good" was agreed to mean, so completion stays checkable. Then proceed to Step 1.
 
+## Step 0 Helper: Grill Me (optional)
+
+The Consultation loop above is the baseline for resolving ambiguity. Grill Me is an optional third part — a question-driven interrogator that walks the decision tree one branch at a time — that can be slotted in **before** drafting Goal / Constraints / Acceptance, to pre-filter ambiguity through structured waves of questions, each with a recommended answer.
+
+When Grill Me is engaged, Step 0 runs in three layers before drafting:
+
+1. **Shallow consultation** — the baseline loop above raises real forks and gives recommendations.
+2. **Grill Me pass** — sequential question waves drive the user through unresolved branches, each question carrying a recommended answer; the user accepts, redirects, or rejects per question.
+3. **MAGI escalation** — for any remaining genuinely split, high-stakes fork, step 4 of the Consultation loop still applies (run MAGI if installed, else get a second opinion another way).
+
+Then drafting `requirements.md` proceeds as usual.
+
+Grill Me is a pre-filter, not a replacement for MAGI. Skipping Grill Me is safe because MAGI remains the deeper-deliberation backstop for high-stakes forks.
+
+Control via `.vdgg-target` (`references/target_schema.md`):
+
+- `GRILLME=off` (default): do not run Grill Me. Behavior is unchanged from the Consultation loop and MAGI escalation alone.
+- `GRILLME=on`: always run Grill Me at Step 0 before drafting, even for clear-shape tasks.
+- `GRILLME=auto`: run Grill Me when any of the Consultation entry conditions hold — the goal is ambiguous; the work is subjective or creative; the change is high-stakes; or more than one defensible direction exists. Same trigger list as Consultation itself, so they fire together.
+
+If the Grill Me skill is not installed, the setting is treated as `off` and Step 0 continues with Consultation. The orchestrating agent invokes the installed Grill Me skill directly; there is no shell helper for this (the same convention as MAGI escalation).
+
 ## Step 1: Formation Declaration
 
 Initialize state. Source the state helpers in every Bash command that calls `vdgg_*` functions (shells do not persist between commands). For manual installs the helpers live at `$HOME/.claude/skills/vibesdegogo`; for plugin installs use this skill's base directory as announced when the skill loads:
