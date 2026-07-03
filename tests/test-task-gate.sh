@@ -115,6 +115,39 @@ rm -rf tasks
 
 vdgg_state_clear >/dev/null 2>&1
 
+# Re-arm guard: vdgg_task_begin is rejected outside Step 5 (e.g. implementing)
+# BEFORE any side effect — the active allowlist/baseline must survive intact —
+# and re-arming with a wider allowlist works via the legal 8 -> 5 route.
+vdgg_state_init >/tmp/vdgg-test-task-rearm-init.out 2>/tmp/vdgg-test-task-rearm-init.err
+IDRA=$(vdgg_get_id)
+vdgg_state_advance 2 requirements >/dev/null 2>&1
+vdgg_state_advance 3 investigating >/dev/null 2>&1
+vdgg_state_advance 4 planning >/dev/null 2>&1
+vdgg_state_advance 5 task-selected >/dev/null 2>&1
+vdgg_task_begin "TA: rearm guard" src/app.sh >/dev/null 2>&1
+vdgg_state_advance 6 implementing >/dev/null 2>&1
+set +e
+vdgg_task_begin "TA: widened from implementing" src/app.sh src/other.sh \
+    >/tmp/vdgg-test-task-rearm-blocked.out 2>/tmp/vdgg-test-task-rearm-blocked.err
+REARM_RC=$?
+set -e
+assert_exit_code 1 "$REARM_RC" "task_begin from implementing is rejected"
+REARM_ALLOWLIST_CONTENT=$(cat ".claude/.vdgg-task-allowlist-${IDRA}-0")
+assert_eq "src/app.sh" "$REARM_ALLOWLIST_CONTENT" "blocked re-arm leaves active allowlist intact"
+REARM_STEP=$(grep '^step=' ".claude/.vdgg-state-${IDRA}" | cut -d= -f2)
+assert_eq "6" "$REARM_STEP" "blocked re-arm leaves state untouched"
+vdgg_state_advance 7 testing >/dev/null 2>&1
+vdgg_state_advance 8 progress >/dev/null 2>&1
+set +e
+vdgg_task_begin "TA: widened via 8->5" src/app.sh src/other.sh \
+    >/tmp/vdgg-test-task-rearm-ok.out 2>/tmp/vdgg-test-task-rearm-ok.err
+REARM_OK_RC=$?
+set -e
+assert_exit_code 0 "$REARM_OK_RC" "task_begin re-arms via Step 8 -> Step 5"
+REARM_WIDE_COUNT=$(wc -l < ".claude/.vdgg-task-allowlist-${IDRA}-0" | tr -d ' ')
+assert_eq "2" "$REARM_WIDE_COUNT" "re-arm via 8->5 records the widened allowlist"
+vdgg_state_clear >/dev/null 2>&1
+
 # zsh regression: `local path` would empty $PATH when sourced into zsh.
 if command -v zsh >/dev/null 2>&1; then
     vdgg_state_clear >/dev/null 2>&1
