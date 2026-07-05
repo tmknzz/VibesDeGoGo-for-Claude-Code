@@ -46,7 +46,7 @@ For Step 2, `[VibesDeGoGo! Declaration]` is also accepted because it follows Ste
 
 | phase | Step | Edit/Write | Bash | Agent |
 |---|---:|---|---|---|
-| no state | none | allow | allow | allow |
+| no state | none | allow (deny when `VDGG_REQUIRED=on`) | allow (deny writes/commits when `VDGG_REQUIRED=on`) | allow |
 | `declare` | 1 | only `tasks/vdgg/{id}/` | allow except state writes | block |
 | `requirements` | 2 | only `tasks/vdgg/{id}/` | require `requirements.md` before Step 3 | block |
 | `investigating` | 3 | only `tasks/vdgg/{id}/` | allow except state writes | allow |
@@ -58,6 +58,34 @@ For Step 2, `[VibesDeGoGo! Declaration]` is also accepted because it follows Ste
 | `verified` | 7 end | block | allow except state writes | allow |
 | `progress` | 8 | only `progress.md` and configured version files | allow except state writes | allow |
 | `commit` | 9 | only `progress.md` and configured version files | allow commit; block base branch commit/push in branch-pr | allow |
+
+## Entry Gate (VDGG_REQUIRED)
+
+While no session is armed (no `.claude/.vdgg-active`, empty id, or missing
+state file), the hooks are normally fail-open. When the repository's
+`.vdgg-target` sets `VDGG_REQUIRED=on` (the literal value `on` only), the
+PreToolUse hook instead denies, until `vdgg_state_init` arms a session:
+
+- `Edit` / `Write` / `NotebookEdit` on any path (including `.vdgg-target`
+  itself, so the gate cannot be self-disabled),
+- unknown tools that expose a `file_path` / `notebook_path` (fail-closed),
+- Bash segments that write files: redirects to real paths (`>` / `>>`;
+  redirects to `/dev/null`, `/dev/stdout`, `/dev/stderr` and fd dups like
+  `2>&1` are exempt), `tee`, a leading mutating verb (`rm`, `mv`, `cp`, `dd`,
+  `install`, `truncate`, `touch`, `ln`, `patch`, `mkfifo`), `sed`/`perl`
+  with `-i`, or `git commit`.
+
+Read-only tools, `Agent` (a subagent's own tool calls pass through this same
+hook), builds/tests, and the arming command itself stay allowed. Without jq
+the hook cannot classify tools, so it fails closed while the key is `on`
+(only jq installation commands pass). Absent/`off`/other values keep the
+historical fail-open behavior, so repositories that never opted in are
+untouched.
+
+Rationale: arming the gates must not be a voluntary act. An agent that
+ignores the workflow contract (observed 2026-07-05: a model invoked the
+skill, never ran `vdgg_state_init`, and committed directly) would otherwise
+keep every guard dormant. The deny message points to Step 1.
 
 ## Error Recognition
 
@@ -111,3 +139,4 @@ are excluded). Sentinels cannot be written directly; see Common Guards.
 - The Stop hook depends on Claude Code providing `cwd` and `transcript_path` in hook JSON. If Claude Code changes that contract, the Stop hook may become a no-op rather than a blocker.
 - The reflection gate compares whole-second file mtimes; if `progress.md` or `investigation-r*.md` is written in the same second as the state transition, the return to implementing can be blocked once — retrying a moment later succeeds.
 - The sidecar write guard matches the literal `.claude/.vdgg-` path in the Bash command text. A segment that hides the path behind a shell variable or command substitution (e.g. `D=.claude; rm -f "$D/.vdgg-active"`) can evade the match. The hook raises the cost of forgery but is a guardrail, not a security boundary; it does not sandbox a determined agent.
+- The entry gate's Bash write detection shares the same literal-match limits: interpreter one-liners (`python -c "open('f','w')"`), writes hidden behind shell variables, `>|` (noclobber overwrite, split away with `|` during segmenting), and a bare trailing `>` left at a segment end are not detected. It stops contract-ignoring drift (the observed failure mode), not a deliberately evasive agent.
