@@ -43,6 +43,34 @@ write_state reflection 6
 STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"# [VibesDeGoGo! Step 6 Start] step=6, phase=implementing, loop=0\nvdgg_state_loop 6 implementing"}}')
 assert_exit_code 2 "$STATUS" "reflection cannot return without retry investigation"
 
+# reflection -> implementing is allowed when the retry investigation and progress
+# are both newer than the state file. This exercises the mtime freshness check
+# (_vdgg_mtime), which must return a real epoch on both BSD and GNU.
+write_state reflection 6
+printf 'retry\n' > "$TMPDIR_VDGG/tasks/vdgg/test-id/investigation-r0.md"
+printf 'progress\n' > "$TMPDIR_VDGG/tasks/vdgg/test-id/progress.md"
+# Make the state file old so the freshly written retry files are strictly newer
+# (portable: `touch -t CCYYMMDDhhmm` behaves the same on macOS and Linux).
+touch -t 202601010000 "$TMPDIR_VDGG/.claude/.vdgg-state-test-id"
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"# [VibesDeGoGo! Step 6 Start] step=6, phase=implementing, loop=0\nvdgg_state_loop 6 implementing"}}')
+assert_exit_code 0 "$STATUS" "reflection returns to implementing with fresh retry investigation"
+
+# Regression guard for the freshness check: when the retry investigation is OLDER
+# than the state file (i.e. not written during this reflection), the return must
+# be blocked. A broken _vdgg_mtime returns a non-numeric value, and `[ x -le y ]`
+# then errors to false so the block is skipped -> the gate fails OPEN and wrongly
+# allows the return. This case is what actually catches the GNU stat portability
+# bug (the "fresh" case above passes even with the bug).
+write_state reflection 6
+printf 'stale\n' > "$TMPDIR_VDGG/tasks/vdgg/test-id/investigation-r0.md"
+printf 'stale\n' > "$TMPDIR_VDGG/tasks/vdgg/test-id/progress.md"
+touch -t 202601010000 \
+    "$TMPDIR_VDGG/tasks/vdgg/test-id/investigation-r0.md" \
+    "$TMPDIR_VDGG/tasks/vdgg/test-id/progress.md"
+touch "$TMPDIR_VDGG/.claude/.vdgg-state-test-id"
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"# [VibesDeGoGo! Step 6 Start] step=6, phase=implementing, loop=0\nvdgg_state_loop 6 implementing"}}')
+assert_exit_code 2 "$STATUS" "reflection with stale retry investigation is blocked (mtime freshness)"
+
 write_state commit 9
 STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"git push origin main"}}')
 assert_exit_code 2 "$STATUS" "branch-pr blocks pushing main"
