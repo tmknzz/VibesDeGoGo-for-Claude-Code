@@ -256,4 +256,82 @@ printf '%s' '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command
 STATUS=$?
 set -e
 assert_exit_code 2 "$STATUS" "jq missing + active session fails closed"
+
+# --- VDGG_REQUIRED entry gate: unarmed sessions in an opted-in repository ---
+
+ENTRY_DIR=$(mktemp -d)
+printf 'VDGG_REQUIRED=on\n' > "$ENTRY_DIR/.vdgg-target"
+
+STATUS=$(run_hook '{"tool_name":"Edit","cwd":"'"$ENTRY_DIR"'","tool_input":{"file_path":"'"$ENTRY_DIR"'/src/app.sh"}}')
+assert_exit_code 2 "$STATUS" "entry gate: unarmed Edit is denied"
+
+STATUS=$(run_hook '{"tool_name":"Write","cwd":"'"$ENTRY_DIR"'","tool_input":{"file_path":"'"$ENTRY_DIR"'/.vdgg-target"}}')
+assert_exit_code 2 "$STATUS" "entry gate: unarmed write to .vdgg-target is denied (no self-disable)"
+
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$ENTRY_DIR"'","tool_input":{"command":"git commit -m x"}}')
+assert_exit_code 2 "$STATUS" "entry gate: unarmed git commit is denied"
+
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$ENTRY_DIR"'","tool_input":{"command":"echo VDGG_REQUIRED=off > .vdgg-target"}}')
+assert_exit_code 2 "$STATUS" "entry gate: unarmed redirect write is denied"
+
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$ENTRY_DIR"'","tool_input":{"command":"sed -i.bak s/on/off/ .vdgg-target"}}')
+assert_exit_code 2 "$STATUS" "entry gate: unarmed sed -i is denied"
+
+STATUS=$(run_hook '{"tool_name":"SomeFutureWriteTool","cwd":"'"$ENTRY_DIR"'","tool_input":{"file_path":"'"$ENTRY_DIR"'/src/x.py"}}')
+assert_exit_code 2 "$STATUS" "entry gate: unarmed unknown write tool is denied (fail-closed)"
+
+STATUS=$(run_hook '{"tool_name":"Read","cwd":"'"$ENTRY_DIR"'","tool_input":{"file_path":"'"$ENTRY_DIR"'/src/app.sh"}}')
+assert_exit_code 0 "$STATUS" "entry gate: unarmed Read passes"
+
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$ENTRY_DIR"'","tool_input":{"command":"git status && grep -m1 ^VDGG_REQUIRED= .vdgg-target"}}')
+assert_exit_code 0 "$STATUS" "entry gate: unarmed read-only bash passes"
+
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$ENTRY_DIR"'","tool_input":{"command":"grep -r pattern src 2>/dev/null"}}')
+assert_exit_code 0 "$STATUS" "entry gate: harmless stderr redirect to /dev/null passes"
+
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$ENTRY_DIR"'","tool_input":{"command":"xcodebuild build > /dev/null 2>&1"}}')
+assert_exit_code 0 "$STATUS" "entry gate: build with output discarded to /dev/null passes"
+
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$ENTRY_DIR"'","tool_input":{"command":"grep pattern src/app.sh 2>/dev/null > out.txt"}}')
+assert_exit_code 2 "$STATUS" "entry gate: real file redirect is still denied alongside /dev/null"
+
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$ENTRY_DIR"'","tool_input":{"command":"VDGG_SKILL_DIR=$HOME/.claude/skills/vibesdegogo\nsource \"$VDGG_SKILL_DIR/scripts/vdgg-state.sh\"\nvdgg_state_init"}}')
+assert_exit_code 0 "$STATUS" "entry gate: the arming command itself passes"
+
+# Armed session in the same repository: entry gate steps aside, phase guards rule.
+mkdir -p "$ENTRY_DIR/.claude" "$ENTRY_DIR/tasks/vdgg/entry-id"
+printf 'entry-id\n' > "$ENTRY_DIR/.claude/.vdgg-active"
+cat > "$ENTRY_DIR/.claude/.vdgg-state-entry-id" <<EOF
+step=3
+phase=investigating
+loop_count=0
+current_task=T
+vdgg_id=entry-id
+last_updated=2026-07-05T00:00:00Z
+EOF
+STATUS=$(run_hook '{"tool_name":"Edit","cwd":"'"$ENTRY_DIR"'","tool_input":{"file_path":"'"$ENTRY_DIR"'/tasks/vdgg/entry-id/investigation.md"}}')
+assert_exit_code 0 "$STATUS" "entry gate: armed session follows normal phase rules (task notes pass)"
+STATUS=$(run_hook '{"tool_name":"Edit","cwd":"'"$ENTRY_DIR"'","tool_input":{"file_path":"'"$ENTRY_DIR"'/src/app.sh"}}')
+assert_exit_code 2 "$STATUS" "entry gate: armed session still phase-blocks implementation edits"
+rm -f "$ENTRY_DIR/.claude/.vdgg-active" "$ENTRY_DIR/.claude/.vdgg-state-entry-id"
+
+# Off / absent key: historical fail-open behavior is unchanged.
+printf 'VDGG_REQUIRED=off\n' > "$ENTRY_DIR/.vdgg-target"
+STATUS=$(run_hook '{"tool_name":"Edit","cwd":"'"$ENTRY_DIR"'","tool_input":{"file_path":"'"$ENTRY_DIR"'/src/app.sh"}}')
+assert_exit_code 0 "$STATUS" "entry gate: VDGG_REQUIRED=off keeps fail-open"
+
+rm -f "$ENTRY_DIR/.vdgg-target"
+STATUS=$(run_hook '{"tool_name":"Edit","cwd":"'"$ENTRY_DIR"'","tool_input":{"file_path":"'"$ENTRY_DIR"'/src/app.sh"}}')
+assert_exit_code 0 "$STATUS" "entry gate: absent .vdgg-target keeps fail-open"
+
+# jq missing + VDGG_REQUIRED=on + unarmed: fail closed (tools cannot be classified).
+printf 'VDGG_REQUIRED=on\n' > "$ENTRY_DIR/.vdgg-target"
+set +e
+printf '%s' '{"tool_name":"Bash","cwd":"'"$ENTRY_DIR"'","tool_input":{"command":"echo hi"}}' \
+    | env PATH="$FAKEBIN" "$BASH_BIN" "$PRETOOL" >/dev/null 2>&1
+STATUS=$?
+set -e
+assert_exit_code 2 "$STATUS" "entry gate: jq missing + required + unarmed fails closed"
+
+rm -rf "$ENTRY_DIR"
 rm -rf "$FAKEBIN" "$NO_VDGG_DIR"

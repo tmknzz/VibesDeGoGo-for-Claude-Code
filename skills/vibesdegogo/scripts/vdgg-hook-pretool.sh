@@ -13,7 +13,13 @@ if ! command -v jq >/dev/null 2>&1; then
     FALLBACK_CWD=$(printf '%s' "$INPUT" | grep -oE '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed -E 's/.*:[[:space:]]*"([^"]*)"$/\1/')
     FALLBACK_CWD="${FALLBACK_CWD:-$PWD}"
     if [ ! -f "$FALLBACK_CWD/.claude/.vdgg-active" ]; then
-        exit 0
+        # Unarmed session. When the repository opts in with VDGG_REQUIRED=on,
+        # tools cannot be classified without jq, so fall through to the
+        # fail-closed branch below; otherwise stay out of the way.
+        FALLBACK_REQUIRED=$(grep -m1 '^VDGG_REQUIRED=' "$FALLBACK_CWD/.vdgg-target" 2>/dev/null | sed -E 's/^[^=]*=//; s/^"(.*)"$/\1/' || true)
+        if [ "$FALLBACK_REQUIRED" != "on" ]; then
+            exit 0
+        fi
     fi
     # An active session must not run unguarded. Fail closed, but allow the
     # current Bash command through if it is itself an attempt to install jq,
@@ -52,21 +58,110 @@ if [ -z "$CWD" ]; then
     exit 0
 fi
 
+# Entry gate (VDGG_REQUIRED): normally an unarmed session (no active id or
+# state) leaves the hook fail-open so unrelated repositories are never
+# touched. A repository can opt out of that leniency with VDGG_REQUIRED=on in
+# .vdgg-target: code-modifying tools are then denied until a session is armed
+# through vdgg_state_init. This closes the hole where an agent that ignores
+# the workflow contract simply never arms the gates (arming must not be a
+# voluntary act). Only the literal value `on` activates the gate; anything
+# else keeps the historical fail-open behavior.
+_vdgg_required() {
+    local target="$CWD/.vdgg-target" v
+    [ -f "$target" ] || return 1
+    v=$(grep -m1 '^VDGG_REQUIRED=' "$target" | sed -E 's/^[^=]*=//; s/^"(.*)"$/\1/')
+    [ "$v" = "on" ]
+}
+
+_vdgg_entry_deny() {
+    echo "VibesDeGoGo! entry gate: this repository sets VDGG_REQUIRED=on in .vdgg-target and no VibesDeGoGo! session is armed. Code-modifying tools are blocked until Step 1 runs: source \"\$HOME/.claude/skills/vibesdegogo/scripts/vdgg-state.sh\" && vdgg_state_init. Only a human may relax this by editing .vdgg-target." >&2
+    exit 2
+}
+
+# Decide an unarmed tool call under VDGG_REQUIRED=on. Mirrors the armed
+# path's tool classification: known read-only tools pass, file edits are
+# denied, unknown tools exposing a file path are denied (fail-closed), and
+# Bash is denied per segment when it writes files or commits. Agent passes
+# because a subagent's own tool calls go through this same hook. Known limit
+# (same as the sidecar guard): a write hidden behind a shell variable or an
+# interpreter one-liner evades the literal segment match; see
+# references/hook_rules.md.
+_vdgg_entry_gate() {
+    case "$TOOL_NAME" in
+        Read|Glob|Grep|LS|NotebookRead|TodoWrite|WebFetch|WebSearch|BashOutput|KillShell|Agent)
+            exit 0
+            ;;
+        Edit|Write|NotebookEdit)
+            _vdgg_entry_deny
+            ;;
+        Bash)
+            local cmd segs seg seg_checked verb
+            cmd=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
+            segs="$cmd"
+            segs="${segs//&&/$'\n'}"
+            segs="${segs//||/$'\n'}"
+            segs="${segs//;/$'\n'}"
+            segs="${segs//|/$'\n'}"
+            while IFS= read -r seg; do
+                # Redirections to /dev/null|stdout|stderr do not modify the
+                # repository; strip them (fd dups like 2>&1 are already
+                # excluded by the [^&] below) so read-only idioms such as
+                # `grep x f 2>/dev/null` are not falsely denied.
+                seg_checked=$(printf '%s' "$seg" | sed -E 's#[0-9]*>>?[[:space:]]*/dev/(null|stdout|stderr)##g')
+                if echo "$seg_checked" | grep -qE '(>[^&]|>>|(^|[[:space:]])tee([[:space:]]|$))'; then
+                    _vdgg_entry_deny
+                fi
+                if echo "$seg" | grep -qE '(^|[^a-zA-Z0-9_-])git[[:space:]]+commit($|[[:space:]])'; then
+                    _vdgg_entry_deny
+                fi
+                verb=$(printf '%s' "$seg" | sed -E 's/^[[:space:]]*//; s/[[:space:]].*//')
+                case "$verb" in
+                    rm|mv|cp|dd|install|truncate|touch|ln|patch|mkfifo)
+                        _vdgg_entry_deny
+                        ;;
+                    sed|perl)
+                        if echo "$seg" | grep -qE '(^|[[:space:]])-[a-zA-Z]*i'; then
+                            _vdgg_entry_deny
+                        fi
+                        ;;
+                esac
+            done <<< "$segs"
+            exit 0
+            ;;
+        *)
+            FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
+            if [ -n "$FILE_PATH" ]; then
+                _vdgg_entry_deny
+            fi
+            exit 0
+            ;;
+    esac
+}
+
+# Unarmed exit: with the VDGG_REQUIRED opt-in the entry gate decides
+# (always exits); without it the hook stays out of the way.
+_vdgg_unarmed_exit() {
+    if _vdgg_required; then
+        _vdgg_entry_gate
+    fi
+    exit 0
+}
+
 # Active file stores the current VibesDeGoGo! id.
 ACTIVE_FILE="$CWD/.claude/.vdgg-active"
 if [ ! -f "$ACTIVE_FILE" ]; then
-    exit 0
+    _vdgg_unarmed_exit
 fi
 
 VDGG_ID=$(cat "$ACTIVE_FILE")
 if [ -z "$VDGG_ID" ]; then
-    exit 0
+    _vdgg_unarmed_exit
 fi
 
 # Load the state file for the active id.
 STATE_FILE="$CWD/.claude/.vdgg-state-${VDGG_ID}"
 if [ ! -f "$STATE_FILE" ]; then
-    exit 0
+    _vdgg_unarmed_exit
 fi
 
 PHASE=$(grep "^phase=" "$STATE_FILE" | cut -d= -f2 || true)

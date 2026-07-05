@@ -47,6 +47,21 @@ TEST_COMMAND_PATTERN="<extended regex>"
 # Treated as off if the Grill Me skill is not installed.
 GRILLME=auto
 
+# Entry gate. Normally the hooks are fail-open while no VibesDeGoGo! session
+# is armed (no .claude/.vdgg-active), so unrelated repositories are never
+# blocked. Setting VDGG_REQUIRED=on opts this repository out of that
+# leniency: while unarmed, the PreToolUse hook denies Edit/Write/NotebookEdit,
+# unknown tools exposing a file path, and Bash segments that write files
+# (redirects to real paths, tee, rm/mv/cp/dd/install/truncate/touch/ln/patch/
+# mkfifo, sed/perl -i) or run `git commit` — including writes to .vdgg-target
+# itself, so the gate cannot be self-disabled. Read-only tools, builds, and
+# the arming command (vdgg_state_init) stay allowed. Without jq the hook
+# cannot classify tools, so it fails closed while this key is on.
+# Only the literal value `on` activates the gate; absent/off/other values
+# keep the historical fail-open behavior. Set this in repositories where
+# every code change must go through the VibesDeGoGo! workflow.
+VDGG_REQUIRED=off
+
 # Optional external review gate for Step 7. The command must be read-only
 # (findings only, no edits) and exit 0 only when the review passes. Run it
 # with `vdgg_review_run` (no arguments), which writes the review sentinel on
