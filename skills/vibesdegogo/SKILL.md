@@ -18,7 +18,7 @@ Trigger phrases include `/VibesDeGoGo!`, "use VibesDeGoGo!", and similar request
 
 ## Agent Role
 
-- Declare before acting: output a Step declaration at the beginning of each Step.
+- Declare before acting: output a Step declaration at the beginning of each Step (unless `STEP_REPORT=quiet` — see Step reporting below).
 - Update the state file: every Step start and completion must update state through `vdgg_state_*` helpers.
 - Lead Steps 1, 2, 5, 8, and 9 directly.
 - Execute Steps 3, 4, 6, and 7 directly unless delegation is clearly better.
@@ -26,9 +26,19 @@ Trigger phrases include `/VibesDeGoGo!`, "use VibesDeGoGo!", and similar request
 - Do not delegate merely to save context, because the area is unfamiliar, or because the work may take time.
 - Monitor subagents and correct direction if they drift.
 
+### Step reporting
+
+Whenever work is delegated to a subagent or an external executor, output one line in the user-facing text before the delegation:
+
+```text
+[VibesDeGoGo! Delegate] step=N, executor=<model or command>, role=<short role>
+```
+
+`.vdgg-target` may set `STEP_REPORT=quiet` (default: `verbose`; read it with the same safe key extraction as Step 1). Only the literal value `quiet` enables quiet mode; any other value behaves as `verbose`. In quiet mode, omit the chat Step declarations and interim narration. Bash-embedded state-transition declarations (see Step Declaration Format) are unchanged. Quiet mode never omits: the Step 0 agreement, Delegate lines, `[Intentional Stop]`, `[Error Acknowledged]`, the Formation start-tier statement, the simplify-collapse reason, the Step 8 validation request, and the final completion report.
+
 ### Delegated step executors
 
-Steps 3, 4, and 6 communicate only through files under `tasks/vdgg/{id}/`, so their executor is swappable. When `.vdgg-target` sets `STEP3_EXECUTOR_COMMAND`, `STEP4_EXECUTOR_COMMAND`, or `STEP6_EXECUTOR_COMMAND` (see `references/target_schema.md`), run that command for the step instead of doing the work inline, using the matching prompt from `references/subagent_prompts.md` with paths filled in. Before advancing, validate the executor's artifacts yourself: the output file exists and contains the required headings; for Step 6, the task allowlist and `vdgg_task_gate` still apply, which catches any out-of-allowlist edits the executor made. Steps 1, 2, 5, 8, and 9 are never delegated.
+Steps 3, 4, and 6 communicate only through files under `tasks/vdgg/{id}/`, so their executor is swappable. When `.vdgg-target` sets `STEP3_EXECUTOR_COMMAND`, `STEP4_EXECUTOR_COMMAND`, or `STEP6_EXECUTOR_COMMAND` (see `references/target_schema.md`), run that command for the step instead of doing the work inline (output a Delegate line first — see Step reporting), using the matching prompt from `references/subagent_prompts.md` with paths filled in. Before advancing, validate the executor's artifacts yourself: the output file exists and contains the required headings; for Step 6, the task allowlist and `vdgg_task_gate` still apply, which catches any out-of-allowlist edits the executor made. Steps 1, 2, 5, 8, and 9 are never delegated.
 
 ### Formation (executor tiers)
 
