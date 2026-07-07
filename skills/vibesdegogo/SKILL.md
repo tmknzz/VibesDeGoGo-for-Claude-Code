@@ -317,7 +317,7 @@ vdgg_state_advance 4 planning
 
 ## Step 5: Select One Task
 
-Choose one task from `todo.md`. The task must be small enough to complete implementation, tests, and verification in one Step 6 to Step 8 loop; split it before Step 6 if it is not. Declare an allowlist of every implementation/test/documentation file this task is allowed to change; keep it narrow and task-specific. Task notes under `tasks/vdgg/{id}/` never need allowlisting. If the task changes an interface, enum, type, or signature, also include the test file(s) that assert it in the allowlist, so a needed test update does not hit the re-arm wall mid-task.
+Choose one task from `todo.md` — or, during a followup sweep, the next pending `TF` task from the queue in `progress.md`. The task must be small enough to complete implementation, tests, and verification in one Step 6 to Step 8 loop; split it before Step 6 if it is not. Declare an allowlist of every implementation/test/documentation file this task is allowed to change; keep it narrow and task-specific. Task notes under `tasks/vdgg/{id}/` never need allowlisting. If the task changes an interface, enum, type, or signature, also include the test file(s) that assert it in the allowlist, so a needed test update does not hit the re-arm wall mid-task.
 
 ```bash
 # [VibesDeGoGo! Step 5 Start] step=5, phase=task-selected, loop=0
@@ -403,7 +403,7 @@ After simplify returns findings, classify each one and decide before editing:
 Response:
 
 - Any **high or medium** finding → fix it in implementation files. The sentinel will flip to `modified=1`, routing you through reflection — this is correct.
-- **All findings are low (or `[]`)** → DO NOT edit implementation files. Instead, write the findings to `tasks/vdgg/{id}/followup-r{loop_count}.md` and advance directly to `verified`. Low items become candidates for a separate followup PR.
+- **All findings are low (or `[]`)** → DO NOT edit implementation files. Append the findings to `tasks/vdgg/{id}/followup.md` — or, inside a `TF` followup task, to `followup-final.md` — and advance directly to `verified`. Low items are collected by the Step 8 followup sweep.
 
 This stops convergence-loops on cosmetic findings while keeping the hook discipline intact: any implementation edit during testing still flips `modified=1`, so there is no escape hatch for high/medium.
 
@@ -479,7 +479,19 @@ Ask the user for validation according to `DEPLOY_COMMAND`, `DEPLOY_TARGET`, and 
 Update `progress.md` and check whether all tasks are complete:
 
 - unfinished tasks: go back to Step 5,
-- all tasks complete: continue to Step 9.
+- all planned tasks complete: run the followup sweep below, then continue to Step 9.
+
+### Followup sweep (low findings)
+
+On the FIRST Step 8 entry after all planned tasks are complete, build the sweep queue exactly once: read `tasks/vdgg/{id}/followup.md`; if it is empty or absent, continue to Step 9. Otherwise group its items into followup tasks using the Step 4 task-sizing rules, name them with a `TF` prefix (`TF1: ...`, `TF2: ...`), and record the queue in `progress.md` with a status per task (pending / fixed / residue).
+
+Then return to Step 5 (8 -> 5) for the next pending `TF` task, so every fix runs through the normal allowlist, task gate, and review gate, and lands in the same branch and PR as the planned work. Later Step 8 entries during the sweep do NOT re-read `followup.md`; they update the queue statuses in `progress.md` and pick 8 -> 5 while pending `TF` tasks remain, Step 9 when none do. During the sweep, skip the per-task validation ask above — request validation once, before Step 9.
+
+Sweep rules:
+
+- A `TF` task's Step 7 review may use the collapsed single-agent simplify path regardless of `loop_count`: its scope was already screened and classified by a planned task's review.
+- New low findings discovered inside a `TF` task go to `followup-final.md` (append, never overwrite) and are NOT queued — list them in the completion report as residue.
+- An item judged unsafe or out of scope to fix is marked `residue` in the queue with the reason and listed in the completion report.
 
 ## Step 9: Commit
 
@@ -523,7 +535,7 @@ After PR creation or trunk commit/push decision:
 vdgg_state_clear
 ```
 
-Then provide a friendly completion report: what finished, what was verified, what the user needs to do next, build/version numbers if any, and short technical details.
+Then provide a friendly completion report: what finished, what was verified, what the user needs to do next, build/version numbers if any, short technical details, and any residual low findings from the followup sweep (with the reason each was left).
 
 ## Stop Conditions
 
@@ -549,5 +561,5 @@ When stopping intentionally, include `[Intentional Stop]` in assistant text and 
 - [ ] Step 6: implement.
 - [ ] Step 7: verify, run simplify, and only then mark verified.
 - [ ] Step 6-R: if needed, investigate failure, record one hypothesis, and retry.
-- [ ] Step 8: update progress/version and request validation.
+- [ ] Step 8: update progress/version, run the followup sweep for remaining low findings, and request validation.
 - [ ] Step 9: commit, push/PR according to workflow, clear state, and report.
