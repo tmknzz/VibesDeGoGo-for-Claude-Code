@@ -1,7 +1,7 @@
 ---
 name: "VibesDeGoGo!"
 description: "A state-and-hook workflow for Claude Code that keeps coding agents moving until done while stopping only before constraint violations."
-version: 0.3.0
+version: 0.4.0
 ---
 
 # VibesDeGoGo!

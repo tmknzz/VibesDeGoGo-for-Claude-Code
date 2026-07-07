@@ -1,5 +1,3 @@
-# VibesDeGoGo! self-maintenance (dogfooding) state — not part of the distribution.
-# The skill writes these into whatever repo it runs in; when we run VDGG on this
-# repo itself, keep the session state and working artifacts out of commits.
+# Claude Code / VibesDeGoGo!
 .claude/.vdgg-*
 tasks/vdgg/
