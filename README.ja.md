@@ -89,6 +89,17 @@ sudo dnf install jq           # Fedora / RHEL
 `jq` がない場合でも、VDGGセッションが動いていないリポジトリでは
 フックは何もせず邪魔をしません。
 
+## アンインストール
+
+すべての足跡の一覧です（あなた自身でも、Claude に頼む場合でもこのリストで完遂できます）:
+
+- プラグイン導入の場合: Claude Code 内で `/plugin uninstall vibesdegogo@vibesdegogo` を実行（ターミナルからなら `claude plugin uninstall vibesdegogo@vibesdegogo`）。
+- 手動導入の場合: `~/.claude/skills/vibesdegogo/` を削除し、`~/.claude/settings.json` から
+  `vdgg-hook-*.sh` を参照するフック4件（`PreToolUse` / `PostToolUse` / `PostToolUseFailure` / `Stop`）を除去。
+- 各リポジトリ内のセッション生成物: `.claude/.vdgg-*` と `tasks/vdgg/` は削除して安全です。
+  `.gitignore` に自動追記される `.claude/.vdgg-*` のブロックも不要なら消してかまいません。
+- `.vdgg-target` は残してください — これはあなたの設定ファイルで、VDGG が入れたものではありません。
+
 ## テスト
 
 ```bash

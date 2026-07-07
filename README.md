@@ -89,6 +89,18 @@ sudo dnf install jq           # Fedora / RHEL
 Without `jq`, the hooks do nothing and stay out of the way in repositories
 where no VibesDeGoGo! session is running.
 
+## Uninstall
+
+The complete footprint, so you (or your agent) can remove everything:
+
+- Plugin install: run `/plugin uninstall vibesdegogo@vibesdegogo` inside Claude Code (or `claude plugin uninstall vibesdegogo@vibesdegogo` from a terminal).
+- Manual install: delete `~/.claude/skills/vibesdegogo/` and remove the four
+  hook entries (`PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`)
+  that reference `vdgg-hook-*.sh` from `~/.claude/settings.json`.
+- Per-repository session artifacts: `.claude/.vdgg-*` and `tasks/vdgg/` are
+  safe to delete. `.gitignore` gains an auto-appended block for `.claude/.vdgg-*`; drop it if you like.
+- Keep `.vdgg-target` — it is your configuration file, not something VDGG installed.
+
 ## Test
 
 ```bash
