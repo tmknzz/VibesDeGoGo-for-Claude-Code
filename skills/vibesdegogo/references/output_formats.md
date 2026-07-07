@@ -46,6 +46,12 @@ Rules:
 [VibesDeGoGo! Step N Start] step=N, phase=PHASE_NAME, loop=LOOP_COUNT
 ```
 
+## Delegate Line
+
+```text
+[VibesDeGoGo! Delegate] step=N, executor=<model or command>, role=<short role>
+```
+
 ## requirements.md
 
 ```markdown
