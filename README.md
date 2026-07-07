@@ -19,9 +19,11 @@ bash + jq. No account, keys, or telemetry. MIT.
 4. Create `todo.md` and `progress.md`.
 5. Implement one bounded task at a time.
 6. Verify with concrete checks.
-7. Run the simplify gate.
+7. Pass the review gate (simplify or an external review).
 8. Update progress and ask for validation when needed.
-9. Commit and create a PR for the default `branch-pr` workflow.
+9. Commit, and for the default `branch-pr` workflow, create a PR and stop.
+   (A PR — pull request — is GitHub's "review this change" page. Nothing
+   reaches the main code until you approve the merge.)
 
 ## Layout
 
@@ -83,6 +85,9 @@ sudo apt-get install jq       # Debian / Ubuntu / WSL
 apk add jq                    # Alpine
 sudo dnf install jq           # Fedora / RHEL
 ```
+
+Without `jq`, the hooks do nothing and stay out of the way in repositories
+where no VibesDeGoGo! session is running.
 
 ## Test
 
