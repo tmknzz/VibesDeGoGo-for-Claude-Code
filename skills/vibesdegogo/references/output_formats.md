@@ -76,6 +76,7 @@ Required headings:
 5. `## 5. Side effects and risks`
 6. `## 6. Constraints`
 7. `## 7. Verification strategy`
+8. `## 8. Lessons applied`
 
 ## Reflection Entry In progress.md
 

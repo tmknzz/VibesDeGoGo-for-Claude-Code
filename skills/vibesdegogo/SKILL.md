@@ -34,7 +34,7 @@ Whenever work is delegated to a subagent or an external executor, output one lin
 [VibesDeGoGo! Delegate] step=N, executor=<model or command>, role=<short role>
 ```
 
-`.vdgg-target` may set `STEP_REPORT=quiet` (default: `verbose`; read it with the same safe key extraction as Step 1). Only the literal value `quiet` enables quiet mode; any other value behaves as `verbose`. In quiet mode, omit the chat Step declarations and interim narration. Bash-embedded state-transition declarations (see Step Declaration Format) are unchanged. Quiet mode never omits: the Step 0 agreement, Delegate lines, `[Intentional Stop]`, `[Error Acknowledged]`, the Formation start-tier statement, the simplify-collapse reason, the Step 8 validation request, and the final completion report.
+`.vdgg-target` may set `STEP_REPORT=quiet` (default: `verbose`; read it with the same safe key extraction as Step 1). Only the literal value `quiet` enables quiet mode; any other value behaves as `verbose`. In quiet mode, omit the chat Step declarations and interim narration. Bash-embedded state-transition declarations (see Step Declaration Format) are unchanged. Quiet mode never omits: the Step 0 agreement, Delegate lines, Lesson lines, `[Intentional Stop]`, `[Error Acknowledged]`, the Formation start-tier statement, the simplify-collapse reason, the Step 8 validation request, and the final completion report.
 
 ### Delegated step executors
 
@@ -296,7 +296,12 @@ Investigation rules:
 
 - Do not guess. Read actual code.
 - Do not stop at a single file. Trace callers and impact.
-- Consider recent git history, lessons, and project notes when relevant.
+- Consider recent git history and project notes when relevant.
+- Read lessons from recent sessions and record the applicable ones in `investigation.md` under a `## 8. Lessons applied` heading (write `none applicable` when nothing fits):
+
+  ```bash
+  for f in $(ls -t tasks/vdgg/*/lessons.md 2>/dev/null | head -20); do echo "--- $f ---"; cat "$f"; done
+  ```
 - Mark unknowns explicitly.
 
 Then advance:
@@ -471,6 +476,14 @@ vdgg_state_loop 6 implementing
 
 The hook checks that `progress.md` and `investigation-r{loop_count}.md` were updated during reflection.
 
+Right after returning to `implementing`, distill any reusable lesson from this reflection into `tasks/vdgg/{id}/lessons.md` — one entry per lesson: symptom → wrong assumption → correct move. Before writing, re-run the Step 3 lessons command and skip duplicates; write nothing when the failure was one-off (lessons are deliberately failure-derived — clean-pass insights are out of scope). After writing an entry, output one line in the user-facing text so the user can veto it on the spot, while the phase still allows deleting the entry:
+
+```text
+[VibesDeGoGo! Lesson] <one-line summary>
+```
+
+(The reflection phase itself cannot write this file; the hook allows only `progress.md` and `investigation-r*.md` there.)
+
 If the revised hypothesis needs files outside the current allowlist, do not try to widen the allowlist in place — `vdgg_task_begin` cannot re-arm outside Step 5 and will fail loudly. Adapt the fix to the current allowlist (e.g. downgrade an optional cleanup to a followup note), or complete/close this task and take the wider scope as a new task via Step 8 -> Step 5. The task gate must pass again for the new loop before `verified`.
 
 ## Step 8: Progress And Validation Request
@@ -545,7 +558,7 @@ After PR creation or trunk commit/push decision:
 vdgg_state_clear
 ```
 
-Then provide a friendly completion report: what finished, what was verified, what the user needs to do next, build/version numbers if any, short technical details, and any residual low findings from the followup sweep (with the reason each was left).
+Then provide a friendly completion report: what finished, what was verified, what the user needs to do next, build/version numbers if any, short technical details, any residual low findings from the followup sweep (with the reason each was left), and a lessons line (`lessons applied: N / new: M`).
 
 ## Stop Conditions
 
