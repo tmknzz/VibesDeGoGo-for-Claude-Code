@@ -300,7 +300,7 @@ Investigation rules:
 - Read lessons from recent sessions and record the applicable ones in `investigation.md` under a `## 8. Lessons applied` heading (write `none applicable` when nothing fits):
 
   ```bash
-  for f in $(ls -t tasks/vdgg/*/lessons.md 2>/dev/null | head -20); do echo "--- $f ---"; cat "$f"; done
+  for f in $(find tasks/vdgg -name lessons.md -exec ls -t {} + 2>/dev/null | head -20); do echo "--- $f ---"; cat "$f"; done
   ```
 - Mark unknowns explicitly.
 
