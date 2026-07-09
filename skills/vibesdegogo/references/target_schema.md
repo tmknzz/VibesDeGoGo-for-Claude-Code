@@ -79,19 +79,18 @@ REVIEW_COMMAND="codex exec --sandbox read-only 'review the working tree diff for
 # that step instead of doing the step inline, then validates the artifacts
 # (file exists + required headings) before advancing. Placeholders the agent
 # substitutes: {TASKS_DIR}, {REQUIREMENTS}, {INVESTIGATION}, {TODO}, {TASK}.
-# Step 6 delegation requires an active task allowlist; out-of-allowlist edits
-# by the executor are caught by vdgg_task_gate.
 STEP3_EXECUTOR_COMMAND="qwen -p '<investigation prompt from subagent_prompts.md with paths filled in>'"
 STEP4_EXECUTOR_COMMAND=""
-STEP6_EXECUTOR_COMMAND=""
 
 # Optional Formation for Step 6: an ordered, |-separated list of executor
 # commands, cheapest first. The literal tier "inline" is reserved and means
-# the orchestrating agent implements the task itself. Non-inline entries use
-# the same command/placeholder conventions as STEP6_EXECUTOR_COMMAND. When
-# set, STEP6_EXECUTOR_TIERS takes precedence over STEP6_EXECUTOR_COMMAND
-# (which behaves like a single-tier Formation); when unset, behavior is
-# unchanged. Escalation rules live in SKILL.md ("Formation (executor tiers)").
+# the orchestrating agent implements the task itself; when the key is unset,
+# Step 6 always works that way. Other entries use the same command/placeholder conventions as
+# STEP3_EXECUTOR_COMMAND / STEP4_EXECUTOR_COMMAND above ({TASKS_DIR},
+# {REQUIREMENTS}, {INVESTIGATION}, {TODO}, {TASK}). Step 6 delegation requires
+# an active task allowlist; out-of-allowlist edits by the executor are caught
+# by vdgg_task_gate. Escalation rules live in SKILL.md ("Formation (executor
+# tiers)").
 STEP6_EXECUTOR_TIERS="<local-llm-cli> -p '<implementation prompt>'|<stronger-model-cli> -p '<implementation prompt>'|inline"
 ```
 
