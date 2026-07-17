@@ -38,9 +38,40 @@ Whenever work is delegated to a subagent or an external executor, output one lin
 
 ### Delegated step executors
 
-Steps 3, 4, and 6 communicate only through files under `tasks/vdgg/{id}/`, so their executor is swappable. When `.vdgg-target` sets `STEP3_EXECUTOR_COMMAND` or `STEP4_EXECUTOR_COMMAND` (see `references/target_schema.md`), run that command for the step instead of doing the work inline (output a Delegate line first — see Step reporting), using the matching prompt from `references/subagent_prompts.md` with paths filled in. Step 6 delegation does not use a `_COMMAND` key; it is configured through the `STEP6_EXECUTOR_TIERS` ladder (see Formation below). Before advancing, validate the executor's artifacts yourself: the output file exists and contains the required headings; for Step 6, the task allowlist and `vdgg_task_gate` still apply, which catches any out-of-allowlist edits the executor made. Steps 1, 2, 5, 8, and 9 are never delegated.
+Steps 3, 4, and 6 communicate only through files under `tasks/vdgg/{id}/`, so their executor is swappable. Two mechanisms exist and are mutually exclusive per session:
 
-### Formation (executor tiers)
+1. **Step AI Formations** (preferred, shared with the Codex edition) — a named, complete Step-to-AI mapping that covers Step 0/3/4/6/6R/7/0-Grill Me from a single config file. See "Step AI Formations" below.
+2. **`.vdgg-target` `_COMMAND` keys + `STEP6_EXECUTOR_TIERS`** (legacy fallback) — per-step `STEP3_EXECUTOR_COMMAND` / `STEP4_EXECUTOR_COMMAND` and the Step 6 tier ladder `STEP6_EXECUTOR_TIERS`. Active only when no Formation is selected.
+
+Under either mechanism, output a Delegate line before delegation (see Step reporting), and validate the executor's artifacts yourself before advancing: the output file exists and contains the required headings; for Step 6, the task allowlist and `vdgg_task_gate` still apply, which catches any out-of-allowlist edits the executor made. Steps 1, 2, 5, 8, and 9 are never delegated regardless of mechanism.
+
+### Step AI Formations
+
+A Formation is a named, complete Step-to-AI assignment shared with the Codex edition. Select it before Step 0 with `VDGG_FORMATION=<name>` (environment variable) or an explicit user instruction. Before Step 0 consultation begins, source `vdgg-state.sh`, run `vdgg_formation_preflight <name>`, and resolve `STEP_0_AI` and `STEP_0_GRILL_AI` with that explicit name. Then pass the same name to `vdgg_state_init --formation <name>` in Step 1 (or set `VDGG_FORMATION` before calling `vdgg_state_init`, which reads it automatically). Formation files and executor definitions are trusted user configuration outside the repository, shared with the Codex edition:
+
+```text
+${VDGG_CONFIG_DIR:-$HOME/.config/vdgg}/
+  formations/<name>.conf
+  executors/<ai>.conf
+```
+
+A Formation must define every key: `STEP_0_AI` through `STEP_9_AI`, plus `STEP_6R_AI` and `STEP_0_GRILL_AI`. `inline` means the current Claude Code agent (the same agent that runs this skill). Any other AI name must have an executor file containing one `COMMAND=/absolute/path/to/executable` line. The parser never sources these files and the command is executed directly, not through a shell string.
+
+When a Formation is selected, resolve the assigned AI before acting in every Step with `vdgg_formation_resolve <STEP_KEY>`. Use `STEP_6R_AI` for reflection and `STEP_0_GRILL_AI` for Grill Me. Then:
+
+1. `inline`: work normally in the current agent.
+2. External AI: write the smallest sufficient input artifact under `tasks/vdgg/{id}/`, output the Delegate line, and call `vdgg_executor_run <STEP_KEY> <input-file> [output-file]`.
+3. Validate the expected artifact before advancing. A non-zero executor result, missing output, unknown AI, or invalid Formation stops the workflow with state unchanged. Never silently fall back to `inline` or to the legacy `_COMMAND`/`STEP6_EXECUTOR_TIERS` path.
+
+The executor receives `VDGG_EXECUTOR_FORMATION`, `VDGG_EXECUTOR_AI`, `VDGG_EXECUTOR_STEP`, `VDGG_EXECUTOR_INPUT`, and `VDGG_EXECUTOR_OUTPUT`. State transitions, task allowlists, review gates, and commit permissions remain owned by the controlling VDGG session — Claude Code hooks continue to enforce them.
+
+Steps 1, 2, 5, 8, and 9 are inline-only regardless of Formation assignment. The Formation must still define those keys (validation requires all 13 keys); use the literal value `inline` for them.
+
+Relationship with the legacy path: when a Formation is selected, `STEP3_EXECUTOR_COMMAND`, `STEP4_EXECUTOR_COMMAND`, and `STEP6_EXECUTOR_TIERS` are ignored — the Formation's `STEP_3_AI`/`STEP_4_AI`/`STEP_6_AI` are authoritative. When no Formation is selected, the legacy `_COMMAND` keys and the tier ladder below apply as historically. Do not mix both in the same session.
+
+### Step 6 Executor Tiers (no Formation)
+
+Applies only when no Formation is selected (`VDGG_FORMATION` unset and no `--formation` given to `vdgg_state_init`). When a Formation is active, this section does not apply — use `STEP_6_AI` from the Formation instead.
 
 Activation: when `.vdgg-target` sets `STEP6_EXECUTOR_TIERS` (see `references/target_schema.md`), Step 6 uses a tier ladder instead of a single executor. The value is an ordered `|`-separated list of executor commands, cheapest first; the reserved terminal tier `inline` means the agent implements the task itself. When `STEP6_EXECUTOR_TIERS` is unset, Step 6 runs inline.
 
@@ -207,6 +238,8 @@ Control via `.vdgg-target` (`references/target_schema.md`):
 
 If the Grill Me skill is not installed, the setting is treated as `off` and Step 0 continues with Consultation. The orchestrating agent invokes the installed Grill Me skill directly; there is no shell helper for this (the same convention as MAGI escalation).
 
+If a selected Formation assigns `STEP_0_GRILL_AI` to an external AI, that executor owns the complete Grill Me conversation. Its command must keep the transcript out of stdout/stderr and write only the final handoff file. `vdgg_executor_run STEP_0_GRILL_AI <input> <output>` accepts that handoff only when its level-2 headings are exactly, in order: `Goal`, `Constraints`, `Acceptance criteria`, `Decisions`, and `Unresolved questions` (`vdgg_grill_validate_output` enforces this). The HQ consumes that file, not the conversation transcript. If the executor cannot own the interaction on the current surface, stop and report the limitation; do not relay every turn through HQ and call it equivalent.
+
 ## Step 1: Formation Declaration
 
 Initialize state. Source the state helpers in every Bash command that calls `vdgg_*` functions (shells do not persist between commands). For manual installs the helpers live at `$HOME/.claude/skills/vibesdegogo`; for plugin installs use this skill's base directory as announced when the skill loads:
@@ -215,8 +248,14 @@ Initialize state. Source the state helpers in every Bash command that calls `vdg
 VDGG_SKILL_DIR="${VDGG_SKILL_DIR:-$HOME/.claude/skills/vibesdegogo}"
 # Plugin install: replace the default above with this skill's announced base directory.
 source "$VDGG_SKILL_DIR/scripts/vdgg-state.sh"
-vdgg_state_init
+if [ -n "${VDGG_FORMATION:-}" ]; then
+    vdgg_state_init --formation "$VDGG_FORMATION"
+else
+    vdgg_state_init
+fi
 ```
+
+`vdgg_state_init --formation <name>` validates the Formation file and every referenced executor before creating the state file; a failure leaves no session armed. The Formation name is persisted in the state file (`formation=` field) so subsequent Bash commands can call `vdgg_formation_resolve` without re-passing the name. See "Step AI Formations" above for the config directory and file format.
 
 For the default `branch-pr` workflow, create a feature branch after `vdgg_state_init` and before any code editing. The branch name MUST describe the change, not the workflow.
 
@@ -313,6 +352,8 @@ vdgg_state_advance 3 investigating
 
 Use subagents only when parallel investigation clearly helps.
 
+When a Formation is selected and `vdgg_formation_resolve STEP_3_AI` returns a non-`inline` AI, output the Delegate line, write the investigation prompt (see `references/subagent_prompts.md`) with filled-in paths as the input artifact, and call `vdgg_executor_run STEP_3_AI <input-file> tasks/vdgg/{id}/investigation.md`. Validate the required headings on the output before advancing. When no Formation is selected but `.vdgg-target` sets `STEP3_EXECUTOR_COMMAND`, use that legacy path instead.
+
 ## Step 4: Planning
 
 Use `investigation.md` to create `tasks/vdgg/{id}/todo.md` and `tasks/vdgg/{id}/progress.md`.
@@ -329,6 +370,8 @@ Then advance:
 # [VibesDeGoGo! Step 4 Start] step=4, phase=planning, loop=0
 vdgg_state_advance 4 planning
 ```
+
+When a Formation is selected and `vdgg_formation_resolve STEP_4_AI` returns a non-`inline` AI, output the Delegate line, write the planning prompt with filled-in paths as the input artifact, and call `vdgg_executor_run STEP_4_AI <input-file> tasks/vdgg/{id}/todo.md`. Validate the output before advancing (both `todo.md` and `progress.md` must exist). When no Formation is selected but `.vdgg-target` sets `STEP4_EXECUTOR_COMMAND`, use that legacy path instead.
 
 ## Step 5: Select One Task
 
@@ -352,6 +395,8 @@ vdgg_state_advance 6 implementing
 ```
 
 Do not run tests in `implementing`; the hook blocks test commands until Step 7. Edit/Write outside the task allowlist is blocked. `vdgg_task_begin` can only (re)arm at Step 5 — the state machine rejects it from `implementing`/`reflection` (6 -> 5 is not a legal transition). If the scope legitimately grew mid-task, either narrow the change to fit the current allowlist, or finish this task through Step 8 and select the extra scope as a new task at Step 5 (8 -> 5) with the right allowlist.
+
+When a Formation is selected and `vdgg_formation_resolve STEP_6_AI` returns a non-`inline` AI, output the Delegate line, write the implementation prompt (see `references/subagent_prompts.md`) with filled-in paths and the current task's allowlist as the input artifact, and call `vdgg_executor_run STEP_6_AI <input-file>`. The executor edits files in the working tree; the task allowlist and `vdgg_task_gate` still apply, so out-of-allowlist edits are caught at Step 7. When no Formation is selected, `STEP6_EXECUTOR_TIERS` (if set) governs Step 6 — see "Step 6 Executor Tiers (no Formation)" above; otherwise Step 6 runs inline.
 
 ## Step 7: Verify
 
@@ -385,6 +430,8 @@ For environments that cannot use the `simplify` skill, or when `.vdgg-target` co
 vdgg_review_run                      # runs REVIEW_COMMAND from .vdgg-target
 vdgg_review_run <command> [args...]  # runs an explicit review command
 ```
+
+When a Formation is selected and `vdgg_formation_resolve STEP_7_AI` returns a non-`inline` AI, output the Delegate line, write the review prompt with the working-tree diff and verification results as the input artifact, and call `vdgg_executor_run STEP_7_AI <input-file> <findings-output>`. The Formation review is read-only (findings only, no edits); apply the same severity-based response below, then record the gate with `vdgg_state_mark_reviewed` on pass. When no Formation is selected, use `simplify` or `vdgg_review_run` as above.
 
 It writes the review sentinel only when the command exits 0. A purely manual review can still be recorded with `vdgg_state_mark_reviewed`. The verified gate accepts either sentinel — simplify or explicit review — and both are subject to the same rule: implementation edits after the review flip `modified=1` and route through reflection. Prefer the simplify skill when it is available; prefer a different vendor than the implementing model for external review. For code that ships to other machines or handles user data, the review prompt must include a security perspective (injection, secrets exposure, unsafe file/network/exec operations) — simplify does not cover security. Sentinel files cannot be written directly; the hooks block Edit/Write/Bash writes to `.claude/.vdgg-*` paths.
 
@@ -442,7 +489,7 @@ vdgg_state_advance 6 reflection
 
 Reflection is mandatory after failed verification or simplify changes.
 
-At the beginning of reflection, start a researcher subagent for root-cause investigation unless self-maintenance mode explicitly allows skipping it for a mechanical typo/path issue.
+At the beginning of reflection, start a researcher subagent for root-cause investigation unless self-maintenance mode explicitly allows skipping it for a mechanical typo/path issue. When a Formation is selected and `vdgg_formation_resolve STEP_6R_AI` returns a non-`inline` AI, delegate this reflection pass to that executor via `vdgg_executor_run STEP_6R_AI <input-file> tasks/vdgg/{id}/investigation-r{loop_count}.md`.
 
 Lightweight branch: when reflection was triggered by review/simplify findings rather than a test failure, skip the researcher subagent — write `investigation-r{loop_count}.md` directly from the review findings (classify each finding, then state the one fix) instead. A test-failure-triggered reflection still requires the researcher subagent as above. Either way, `investigation-r{loop_count}.md` and `progress.md` must still be written; the hook checks apply the same regardless of which path produced them.
 

@@ -6,6 +6,12 @@ It MUST NOT be `source`d. It is a repository-controlled file, so sourcing it (or
 
 `REVIEW_COMMAND` and `STEP*_EXECUTOR_COMMAND` are executed (via `bash -c` / as the step's command). Treat them as a trust boundary: only use these keys when a human placed the file. Do not use the executable keys from a `.vdgg-target` that shipped inside an untrusted cloned repository; if in doubt, show the value and get confirmation first. To keep the agent from self-authoring these keys to forge a passing review, the PreToolUse hook blocks Edit/Write/Bash writes to `.vdgg-target` (reads stay allowed), the same way it protects the `.claude/.vdgg-*` sidecars.
 
+## Related environment variables
+
+`VDGG_FORMATION` is an environment variable (not a `.vdgg-target` key). When set, it names a Formation from `${VDGG_CONFIG_DIR:-$HOME/.config/vdgg}/formations/<name>.conf` that assigns an AI to every Step. Step 1 reads it and calls `vdgg_state_init --formation "$VDGG_FORMATION"`, which validates the Formation and all referenced executors before creating the state file; the name is persisted in the state file so later `vdgg_formation_resolve <STEP_KEY>` calls do not need to re-pass it. See `SKILL.md` "Step AI Formations" for the full protocol.
+
+When a Formation is selected, the `.vdgg-target` keys `STEP3_EXECUTOR_COMMAND`, `STEP4_EXECUTOR_COMMAND`, and `STEP6_EXECUTOR_TIERS` are ignored — the Formation's per-Step AI assignments are authoritative. When no Formation is selected, those keys apply as historically. Do not mix both mechanisms in the same session.
+
 ## Fields
 
 ```bash
@@ -82,15 +88,17 @@ REVIEW_COMMAND="codex exec --sandbox read-only 'review the working tree diff for
 STEP3_EXECUTOR_COMMAND="qwen -p '<investigation prompt from subagent_prompts.md with paths filled in>'"
 STEP4_EXECUTOR_COMMAND=""
 
-# Optional Formation for Step 6: an ordered, |-separated list of executor
-# commands, cheapest first. The literal tier "inline" is reserved and means
-# the orchestrating agent implements the task itself; when the key is unset,
-# Step 6 always works that way. Other entries use the same command/placeholder conventions as
+# Optional Step 6 executor tier ladder for the legacy (no-Formation) path: an
+# ordered, |-separated list of executor commands, cheapest first. The literal
+# tier "inline" is reserved and means the orchestrating agent implements the
+# task itself; when the key is unset, Step 6 always works that way. Other
+# entries use the same command/placeholder conventions as
 # STEP3_EXECUTOR_COMMAND / STEP4_EXECUTOR_COMMAND above ({TASKS_DIR},
 # {REQUIREMENTS}, {INVESTIGATION}, {TODO}, {TASK}). Step 6 delegation requires
 # an active task allowlist; out-of-allowlist edits by the executor are caught
-# by vdgg_task_gate. Escalation rules live in SKILL.md ("Formation (executor
-# tiers)").
+# by vdgg_task_gate. Escalation rules live in SKILL.md ("Step 6 Executor
+# Tiers (no Formation)"). Ignored when a Formation is selected — use
+# STEP_6_AI from the Formation instead.
 STEP6_EXECUTOR_TIERS="<local-llm-cli> -p '<implementation prompt>'|<stronger-model-cli> -p '<implementation prompt>'|inline"
 ```
 
