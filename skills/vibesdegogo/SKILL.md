@@ -69,6 +69,17 @@ Steps 1, 2, 5, 8, and 9 are inline-only regardless of Formation assignment. The 
 
 Relationship with the legacy path: when a Formation is selected, `STEP3_EXECUTOR_COMMAND`, `STEP4_EXECUTOR_COMMAND`, and `STEP6_EXECUTOR_TIERS` are ignored — the Formation's `STEP_3_AI`/`STEP_4_AI`/`STEP_6_AI` are authoritative. When no Formation is selected, the legacy `_COMMAND` keys and the tier ladder below apply as historically. Do not mix both in the same session.
 
+### Local llama-server executors
+
+When a Formation assigns a Step to an executor backed by a locally-hosted `llama-server` (llama.cpp), VDGG ships two helpers so the server configuration lives in one declarative file instead of being scattered across `~/.zshrc`, launchd plists, and executor wrapper scripts:
+
+- [`references/servers-conf.md`](references/servers-conf.md) — schema and CLI contract for `${VDGG_CONFIG_DIR:-$HOME/.config/vdgg}/servers.conf` (source of truth).
+- [`references/servers.conf.example`](references/servers.conf.example) — a copy-and-edit fixture.
+- [`scripts/vdgg-llm-start.sh`](scripts/vdgg-llm-start.sh) — a thin wrapper: `--check`, `--dry-run <id>`, `<id>` (exec).
+- [`references/local-inference-setup.md`](references/local-inference-setup.md) — first-run walkthrough for macOS launchd (tested) and Linux systemd (schema-compatible, awaiting community verification).
+
+Executor `COMMAND=` lines can then call `vdgg-llm-start <id>` through a wrapper that sends the actual request to `http://127.0.0.1:<port>`. Only the port/api key move; the executor script itself no longer hard-codes them.
+
 ### Step 6 Executor Tiers (no Formation)
 
 Applies only when no Formation is selected (`VDGG_FORMATION` unset and no `--formation` given to `vdgg_state_init`). When a Formation is active, this section does not apply — use `STEP_6_AI` from the Formation instead.
